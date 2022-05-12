@@ -55,9 +55,6 @@ func main() {
 }
 
 func handleEvent(gh *GithubClient, payload []byte) error {
-	fmt.Println("Handling Event. Payload:")
-	fmt.Println(string(payload))
-
 	if ic := NewIssueCommentWebhook(payload); ic != nil {
 		fmt.Println("Handling issue comment event.")
 		err := handleComment(gh, ic)
