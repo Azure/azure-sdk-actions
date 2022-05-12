@@ -1,4 +1,4 @@
-module github.com/azure/azure-sdk-tools/tools/check-enforcer-action
+module github.com/benbp/azure-sdk-actions
 
 go 1.18
 
