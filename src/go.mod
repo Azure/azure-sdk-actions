@@ -1,4 +1,4 @@
-module github.com/benbp/azure-sdk-actions
+module github.com/azure/azure-sdk-actions
 
 go 1.18
 
