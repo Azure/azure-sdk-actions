@@ -13,7 +13,7 @@ Check Enforcer is our solution. We use the built-in triggering w/ path filter op
 ## Enabling Check Enforcer for a Repository
 
 1. Copy the following workflow files into your repo and check them into the main branch:
-    - `.github/workflows/event.yaml`
+    - `../example-workflow.yaml` ([link](https://github.com/Azure/azure-sdk-actions/blob/main/example-workflow.yaml))
 1. Create a pull request so that one of the above actions will run and post a status.
 1. Add a new branch protection rule in your repository settings: `https://github.com/<org>/<repo>/settings/branches`
     - Enter the default branch or desired branch name pattern.
