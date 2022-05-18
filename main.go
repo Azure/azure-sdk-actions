@@ -124,7 +124,7 @@ func handleComment(gh *GithubClient, ic *IssueCommentWebhook) error {
 		pr, err := gh.GetPullRequest(ic.GetPullsUrl())
 		handleError(err)
 		return gh.SetStatus(pr.GetStatusesUrl(), succeededBody)
-	} else if command == "evaluate" {
+	} else if command == "evaluate" || command == "reset" {
 		// We cannot use the commits url from the issue object because it
 		// is targeted to the main repo. To get all check suites for a commit,
 		// a request must be made to the repos API for the repository the pull
@@ -141,10 +141,6 @@ func handleComment(gh *GithubClient, ic *IssueCommentWebhook) error {
 		} else {
 			return gh.SetStatus(pr.GetStatusesUrl(), pendingBody)
 		}
-	} else if command == "reset" {
-		pr, err := gh.GetPullRequest(ic.GetPullsUrl())
-		handleError(err)
-		return gh.SetStatus(pr.GetStatusesUrl(), pendingBody)
 	} else {
 		return nil
 	}
