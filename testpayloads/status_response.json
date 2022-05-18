@@ -1,0 +1,32 @@
+{
+  "url": "https://api.github.com/repos/benbp/azure-sdk-tools/statuses/f4c219b2b5e6605f4945d7a107e2500edb28720f",
+  "avatar_url": "https://avatars.githubusercontent.com/oa/1157143?v=4",
+  "id": 17270120425,
+  "node_id": "SC_kwDOFqc1sc8AAAAEBWEf6Q",
+  "state": "test state",
+  "description": "test description",
+  "target_url": null,
+  "context": "test context",
+  "created_at": "2022-05-02T19:46:59Z",
+  "updated_at": "2022-05-02T19:46:59Z",
+  "creator": {
+    "login": "benbp",
+    "id": 1020379,
+    "node_id": "MDQ6VXNlcjEwMjAzNzk=",
+    "avatar_url": "https://avatars.githubusercontent.com/u/1020379?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/benbp",
+    "html_url": "https://github.com/benbp",
+    "followers_url": "https://api.github.com/users/benbp/followers",
+    "following_url": "https://api.github.com/users/benbp/following{/other_user}",
+    "gists_url": "https://api.github.com/users/benbp/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/benbp/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/benbp/subscriptions",
+    "organizations_url": "https://api.github.com/users/benbp/orgs",
+    "repos_url": "https://api.github.com/users/benbp/repos",
+    "events_url": "https://api.github.com/users/benbp/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/benbp/received_events",
+    "type": "User",
+    "site_admin": false
+  }
+}

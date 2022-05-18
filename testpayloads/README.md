@@ -1,0 +1,1 @@
+This directory contains example payloads taken from the [GitHub API Documentation](https://docs.github.com/en/developers/webhooks-and-events/webhooks/webhook-events-and-payloads) or ad-hoc calls to the API.
