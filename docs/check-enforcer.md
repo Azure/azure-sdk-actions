@@ -1,5 +1,24 @@
 # Check Enforcer
 
+Table of Contents
+=================
+
+  * [Why did we create Check Enforcer?](#why-did-we-create-check-enforcer)
+  * [Enabling Check Enforcer for a Repository](#enabling-check-enforcer-for-a-repository)
+  * [Usage](#usage)
+  * [PR Comment Commands](#pr-comment-commands)
+  * [Need Help?](#need-help)
+  * [Contributing](#contributing)
+  * [Testing and Debugging](#testing-and-debugging)
+     * [Build and Run](#build-and-run)
+        * [Dependencies](#dependencies)
+        * [Build the code](#build-the-code)
+        * [Run code](#run-code)
+        * [Run unit tests](#run-unit-tests)
+        * [Simulate actions locally](#simulate-actions-locally)
+        * [Test in the repository](#test-in-the-repository)
+
+
 ## Why did we create Check Enforcer?
 
 The Azure SDK team maintains reusable libraries that developers use to access Azure services. These libraries are grouped by together into a repository for each language/runtime. For example there is a repository for [Java](https://github.com/azure/azure-sdk-for-java), [.NET](https://github.com/azure/azure-sdk-for-net), [Python](https://github.com/azure/azure-sdk-for-python) and [JavaScript](https://github.com/azure/azure-sdk-for-javascript) - just to name a few.
@@ -54,3 +73,93 @@ Check Enforcer is built primarily for use by the Azure SDK Engineering Systems t
 ## Contributing
 
 Got an idea for Check Enforcer? Great - a good way to start contributing is by creating an issue and discussing with us what you want to do. We are always happy to review unsolicited pull requests and if they match our goals for Check Enforcer we'll work with you to get it merged - but its probably better if you give us a heads up on what you want to achieve first.
+
+## Testing and Debugging
+
+### Build and Run
+
+#### Dependencies
+
+- [Install Go](https://go.dev/doc/install)
+- [Install act](https://github.com/nektos/act#installation) - required if doing local github actions simulation
+- [Install Docker](https://docs.docker.com/engine/install/) - required if using [act](https://github.com/nektos/act) for local testing.
+
+#### Build the code
+
+```
+# Install dependencies
+go mod tidy
+
+# Build code
+go build .
+```
+
+#### Run code
+
+The main program takes a filepath argument that points to a github webhook event payload body. Example payloads can be found in the [github docs](https://docs.github.com/en/developers/webhooks-and-events/webhooks/webhook-events-and-payloads) or mock payloads in the `./testpayloads` directory (most examples in there are pulled from the github docs page).
+
+```
+go run . <path to payload>
+```
+
+#### Run unit tests
+
+```
+go test .
+```
+
+#### Simulate actions locally
+
+To simulate how the program will run as a github action from a repository, you can use [act](https://github.com/nektos/act) to simulate github actions.
+
+Move to the directory containing github workflows that reference this action:
+
+```
+cd <path to repository with .github/workflows/event.yaml resembling example-workflow.yaml>
+```
+
+Update the workflow file to point to the version of the code you are testing and push your changes:
+
+```
+jobs:
+  event-handler:
+    name: Handle ${{ github.event_name }} ${{ github.event.action }} event
+    runs-on: ubuntu-latest
+    steps:
+      - uses: <fork>/azure-sdk-actions@<dev branch>
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+Set github personal access token env variable if you want to test updates. See [Creating a personal access token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token)
+
+```
+GITHUB_TOKEN="<pat>"
+```
+
+Run [act](https://github.com/nektos/act). You need to pass a payload and a matching event trigger (e.g. `issue_comment`,
+`check_suite`, `pull_request_target`):
+
+```
+# Override the base ubuntu-latest image with the golang image. The runner VMs in github actions already have golang installed.
+act -s GITHUB_TOKEN=$GITHUB_TOKEN -P ubuntu-latest=golang -e <actions repo>/testpayloads/issue_comment_event.json issue_comment
+```
+
+#### Test in the repository
+
+1. Set up two forked repositories, one for your changes to this action, and one for testing the github workflows.
+    - For example, myusername/azure-sdk-actions and myusername/azure-sdk-test-repo
+1. Update the workflow file in the relevant repository to point to the version of the code you are testing and push your changes:
+    ```
+    jobs:
+      event-handler:
+        name: Handle ${{ github.event_name }} ${{ github.event.action }} event
+        runs-on: ubuntu-latest
+        steps:
+          - uses: <fork>/azure-sdk-actions@<dev branch>
+            with:
+              token: ${{ secrets.GITHUB_TOKEN }}
+    ```
+1. Check in the above github workflow changes to the fork with the workflow file, and push them to the main branch (github actions trigger only through main branch workflow or action files).
+1. Create a dummy PR against the above fork with the main branch changes. From there you can do things like comment on
+   the PR to trigger events and test changes you have made to your fork of the actions repo.

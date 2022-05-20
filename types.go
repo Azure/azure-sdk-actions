@@ -58,10 +58,6 @@ type PullRequest struct {
 	} `json:"base"`
 }
 
-func (pr *PullRequest) GetStatusesUrl() string {
-	return pr.StatusesUrl
-}
-
 type Repo struct {
 	Id          int    `json:"id"`
 	Name        string `json:"name"`

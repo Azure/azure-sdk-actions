@@ -18,18 +18,21 @@ var pendingBody = StatusBody{
 	State:       CommitStatePending,
 	Description: "Waiting for all checks to complete",
 	Context:     CommitStatusContext,
+	TargetUrl:   CommitStatusContext,
 }
 
 var succeededBody = StatusBody{
 	State:       CommitStateSuccess,
 	Description: "All checks passed",
 	Context:     CommitStatusContext,
+	TargetUrl:   CommitStatusContext,
 }
 
 var failedBody = StatusBody{
 	State:       CommitStateFailure,
 	Description: "Some checks failed",
 	Context:     CommitStatusContext,
+	TargetUrl:   CommitStatusContext,
 }
 
 func main() {
@@ -123,7 +126,7 @@ func handleComment(gh *GithubClient, ic *IssueCommentWebhook) error {
 	} else if command == "override" {
 		pr, err := gh.GetPullRequest(ic.GetPullsUrl())
 		handleError(err)
-		return gh.SetStatus(pr.GetStatusesUrl(), succeededBody)
+		return gh.SetStatus(pr.StatusesUrl, succeededBody)
 	} else if command == "evaluate" || command == "reset" {
 		// We cannot use the commits url from the issue object because it
 		// is targeted to the main repo. To get all check suites for a commit,
@@ -135,11 +138,11 @@ func handleComment(gh *GithubClient, ic *IssueCommentWebhook) error {
 		handleError(err)
 
 		if IsCheckSuiteSucceeded(conclusion) {
-			return gh.SetStatus(pr.GetStatusesUrl(), succeededBody)
+			return gh.SetStatus(pr.StatusesUrl, succeededBody)
 		} else if IsCheckSuiteFailed(conclusion) {
-			return gh.SetStatus(pr.GetStatusesUrl(), failedBody)
+			return gh.SetStatus(pr.StatusesUrl, failedBody)
 		} else {
-			return gh.SetStatus(pr.GetStatusesUrl(), pendingBody)
+			return gh.SetStatus(pr.StatusesUrl, pendingBody)
 		}
 	} else {
 		return nil
@@ -158,11 +161,9 @@ func handleCheckSuite(gh *GithubClient, cs *CheckSuiteWebhook) error {
 		return nil
 	} else if cs.IsSucceeded() {
 		body := succeededBody
-		body.TargetUrl = cs.CheckSuite.Url
 		return gh.SetStatus(cs.GetStatusesUrl(), body)
 	} else if cs.IsFailed() {
 		body := failedBody
-		body.TargetUrl = cs.CheckSuite.Url
 		return gh.SetStatus(cs.GetStatusesUrl(), body)
 	} else {
 		fmt.Println("Skipping check suite with conclusion: ", cs.CheckSuite.Conclusion)
