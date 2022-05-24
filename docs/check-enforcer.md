@@ -35,6 +35,7 @@ Check Enforcer is our solution. We use the built-in triggering w/ path filter op
     - `../example-workflow.yaml` ([link](https://github.com/Azure/azure-sdk-actions/blob/main/example-workflow.yaml))
 1. Create a pull request so that one of the above actions will run and post a status.
 1. Add a new branch protection rule in your repository settings: `https://github.com/<org>/<repo>/settings/branches`
+    - NOTE: The status must be posted at least once for github to show it as a branch protection rule to select, see the above step.
     - Enter the default branch or desired branch name pattern.
     - Check `Require status checks to pass before merging`, search for the status check
       `https://aka.ms/azsdk/checkenforcer` and select it.
