@@ -14,25 +14,31 @@ const GithubTokenKey = "GITHUB_TOKEN"
 const CommitStatusContext = "https://aka.ms/azsdk/checkenforcer"
 const AzurePipelinesAppName = "Azure Pipelines"
 
-var pendingBody = StatusBody{
-	State:       CommitStatePending,
-	Description: "Waiting for all checks to complete",
-	Context:     CommitStatusContext,
-	TargetUrl:   CommitStatusContext,
+func newPendingBody() StatusBody {
+	return StatusBody{
+		State:       CommitStatePending,
+		Description: "Waiting for all checks to complete",
+		Context:     CommitStatusContext,
+		TargetUrl:   getActionLink(),
+	}
 }
 
-var succeededBody = StatusBody{
-	State:       CommitStateSuccess,
-	Description: "All checks passed",
-	Context:     CommitStatusContext,
-	TargetUrl:   CommitStatusContext,
+func newSucceededBody() StatusBody {
+	return StatusBody{
+		State:       CommitStateSuccess,
+		Description: "All checks passed",
+		Context:     CommitStatusContext,
+		TargetUrl:   getActionLink(),
+	}
 }
 
-var failedBody = StatusBody{
-	State:       CommitStateFailure,
-	Description: "Some checks failed",
-	Context:     CommitStatusContext,
-	TargetUrl:   CommitStatusContext,
+func newFailedBody() StatusBody {
+	return StatusBody{
+		State:       CommitStateFailure,
+		Description: "Some checks failed",
+		Context:     CommitStatusContext,
+		TargetUrl:   getActionLink(),
+	}
 }
 
 func main() {
@@ -58,6 +64,12 @@ func main() {
 }
 
 func handleEvent(gh *GithubClient, payload []byte) error {
+	fmt.Println("################################################")
+	fmt.Println("#  AZURE SDK CHECK ENFORCER                    #")
+	fmt.Println("#  Docs: https://aka.ms/azsdk/checkenforcer    #")
+	fmt.Println("################################################")
+	fmt.Println()
+
 	if ic := NewIssueCommentWebhook(payload); ic != nil {
 		fmt.Println("Handling issue comment event.")
 		err := handleComment(gh, ic)
@@ -80,6 +92,17 @@ func handleError(err error) {
 		fmt.Println(err)
 		os.Exit(1)
 	}
+}
+
+func getActionLink() string {
+	// In a github actions environment these env variables will be set.
+	// https://docs.github.com/en/actions/learn-github-actions/environment-variables#default-environment-variables
+	if runId, ok := os.LookupEnv("GITHUB_RUN_ID"); ok {
+		repo := os.Getenv("GITHUB_REPOSITORY")
+		server := os.Getenv("GITHUB_SERVER_URL")
+		return fmt.Sprintf("%s/%s/actions/runs/%s", server, repo, runId)
+	}
+	return CommitStatusContext
 }
 
 func sanitizeComment(comment string) string {
@@ -126,7 +149,7 @@ func handleComment(gh *GithubClient, ic *IssueCommentWebhook) error {
 	} else if command == "override" {
 		pr, err := gh.GetPullRequest(ic.GetPullsUrl())
 		handleError(err)
-		return gh.SetStatus(pr.StatusesUrl, succeededBody)
+		return gh.SetStatus(pr.StatusesUrl, newSucceededBody())
 	} else if command == "evaluate" || command == "reset" {
 		// We cannot use the commits url from the issue object because it
 		// is targeted to the main repo. To get all check suites for a commit,
@@ -138,11 +161,11 @@ func handleComment(gh *GithubClient, ic *IssueCommentWebhook) error {
 		handleError(err)
 
 		if IsCheckSuiteSucceeded(conclusion) {
-			return gh.SetStatus(pr.StatusesUrl, succeededBody)
+			return gh.SetStatus(pr.StatusesUrl, newSucceededBody())
 		} else if IsCheckSuiteFailed(conclusion) {
-			return gh.SetStatus(pr.StatusesUrl, failedBody)
+			return gh.SetStatus(pr.StatusesUrl, newFailedBody())
 		} else {
-			return gh.SetStatus(pr.StatusesUrl, pendingBody)
+			return gh.SetStatus(pr.StatusesUrl, newPendingBody())
 		}
 	} else {
 		return nil
@@ -160,11 +183,9 @@ func handleCheckSuite(gh *GithubClient, cs *CheckSuiteWebhook) error {
 		fmt.Println("Skipping check suite for main branch.")
 		return nil
 	} else if cs.IsSucceeded() {
-		body := succeededBody
-		return gh.SetStatus(cs.GetStatusesUrl(), body)
+		return gh.SetStatus(cs.GetStatusesUrl(), newSucceededBody())
 	} else if cs.IsFailed() {
-		body := failedBody
-		return gh.SetStatus(cs.GetStatusesUrl(), body)
+		return gh.SetStatus(cs.GetStatusesUrl(), newFailedBody())
 	} else {
 		fmt.Println("Skipping check suite with conclusion: ", cs.CheckSuite.Conclusion)
 		return nil
