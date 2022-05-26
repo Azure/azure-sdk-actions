@@ -17,7 +17,7 @@ const AzurePipelinesAppName = "Azure Pipelines"
 func newPendingBody() StatusBody {
 	return StatusBody{
 		State:       CommitStatePending,
-		Description: "Waiting for all checks to complete",
+		Description: "Waiting for all checks to succeed",
 		Context:     CommitStatusContext,
 		TargetUrl:   getActionLink(),
 	}
@@ -32,6 +32,8 @@ func newSucceededBody() StatusBody {
 	}
 }
 
+// NOTE: This is currently unused as we post a pending state on check_suite failure,
+// but keep the function around for now in case we want to revert this behavior.
 func newFailedBody() StatusBody {
 	return StatusBody{
 		State:       CommitStateFailure,
@@ -163,7 +165,9 @@ func handleComment(gh *GithubClient, ic *IssueCommentWebhook) error {
 		if IsCheckSuiteSucceeded(conclusion) {
 			return gh.SetStatus(pr.StatusesUrl, newSucceededBody())
 		} else if IsCheckSuiteFailed(conclusion) {
-			return gh.SetStatus(pr.StatusesUrl, newFailedBody())
+			// Mark as pending with link to action run even on failure, to maintain
+			// consistency with the old check enforcer behavior and avoid confusion for now.
+			return gh.SetStatus(pr.StatusesUrl, newPendingBody())
 		} else {
 			return gh.SetStatus(pr.StatusesUrl, newPendingBody())
 		}
@@ -185,7 +189,9 @@ func handleCheckSuite(gh *GithubClient, cs *CheckSuiteWebhook) error {
 	} else if cs.IsSucceeded() {
 		return gh.SetStatus(cs.GetStatusesUrl(), newSucceededBody())
 	} else if cs.IsFailed() {
-		return gh.SetStatus(cs.GetStatusesUrl(), newFailedBody())
+		// Mark as pending with link to action run even on failure, to maintain
+		// consistency with the old check enforcer behavior and avoid confusion for now.
+		return gh.SetStatus(cs.GetStatusesUrl(), newPendingBody())
 	} else {
 		fmt.Println("Skipping check suite with conclusion: ", cs.CheckSuite.Conclusion)
 		return nil
