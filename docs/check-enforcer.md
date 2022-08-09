@@ -59,7 +59,7 @@ Check Enforcer supports a limited number of commands which can by issued via PR 
 /check-enforcer evaluate
 ```
 
-From time to time Check Enforcer may be blocking a merge because no-check runs are appropriate for the PR, in these cases you can use the following command Check Enforcer rules and park the commit as successful:
+From time to time Check Enforcer may be blocking a merge because no-check runs are appropriate for the PR, in these cases you can use the following command Check Enforcer rules and park the commit as successful. If the check-enforcer fails to pickup the override command, running the check-enforcer evaluate command may resolve the issue:
 
 ```
 /check-enforcer override
