@@ -53,7 +53,15 @@ app.
 
 ## PR Comment Commands
 
-Check Enforcer supports a limited number of commands which can by issued via PR comments. For example if Check Enforcer appears to be stuck you can add a comment as follows to re-evaluate the pull request checks:
+Check Enforcer supports a limited number of commands which can by issued via PR comments.
+
+For available commands and a link to this doc:
+
+```
+/check-enforcer help
+```
+
+If Check Enforcer appears to be stuck you can add a comment as follows to re-evaluate the pull request checks:
 
 ```
 /check-enforcer evaluate
@@ -124,6 +132,10 @@ Update the workflow file to point to the version of the code you are testing and
 ```
 jobs:
   event-handler:
+    permissions:
+      statuses: write      # to set status (azure/azure-sdk-actions)
+      pull-requests: write # to read pull requests and write comments (azure/azure-sdk-actions)
+      checks: read         # to read check status (azure/azure-sdk-actions)
     name: Handle ${{ github.event_name }} ${{ github.event.action }} event
     runs-on: ubuntu-latest
     steps:
@@ -154,6 +166,10 @@ act -s GITHUB_TOKEN=$GITHUB_TOKEN -P ubuntu-latest=golang -e <actions repo>/test
     ```
     jobs:
       event-handler:
+        permissions:
+          statuses: write      # to set status (azure/azure-sdk-actions)
+          pull-requests: write # to read pull requests and write comments (azure/azure-sdk-actions)
+          checks: read         # to read check status (azure/azure-sdk-actions)
         name: Handle ${{ github.event_name }} ${{ github.event.action }} event
         runs-on: ubuntu-latest
         steps:

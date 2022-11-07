@@ -17,6 +17,7 @@ type Payloads struct {
 	PullRequestResponse []byte
 	CheckSuiteResponse  []byte
 	StatusResponse      []byte
+	NewCommentResponse  []byte
 }
 
 func getPayloads() (Payloads, error) {
@@ -42,6 +43,10 @@ func getPayloads() (Payloads, error) {
 	if err != nil {
 		return Payloads{}, err
 	}
+	payloads.StatusResponse, err = ioutil.ReadFile("./testpayloads/new_comment_response.json")
+	if err != nil {
+		return Payloads{}, err
+	}
 	return payloads, nil
 }
 
@@ -58,7 +63,7 @@ func TestCheckSuite(t *testing.T) {
 		assert.Contains(t, r.URL.Path, cs.CheckSuite.HeadSha)
 
 		assert.Equal(t, "POST", r.Method)
-		status := getBody(t, r)
+		status := getStatusBody(t, r)
 		assert.Equal(t, status.State, CommitStateSuccess)
 		postedStatus = true
 
@@ -87,6 +92,7 @@ type testCommentCaseConfig struct {
 	Conclusion    CheckSuiteConclusion
 	ExpectedState CommitState
 	PostStatus    bool
+	PostComment   bool
 }
 
 func TestComments(t *testing.T) {
@@ -98,20 +104,24 @@ func TestComments(t *testing.T) {
 	assert.NotEmpty(t, pr)
 
 	cases := []testCommentCaseConfig{
-		{"/check-enforcer override", CheckSuiteConclusionSuccess, CommitStateSuccess, true},
-		{"/check-enforcer override", CheckSuiteConclusionFailure, CommitStateSuccess, true},
-		{"   /check-enforcer   override   ", CheckSuiteConclusionFailure, CommitStateSuccess, true},
-		{"/check-enforcer reset", CheckSuiteConclusionSuccess, CommitStateSuccess, true},
-		{"/check-enforcer reset", CheckSuiteConclusionFailure, CommitStatePending, true},
-		{"/check-enforcer evaluate", CheckSuiteConclusionSuccess, CommitStateSuccess, true},
-		{"/check-enforcer evaluate", CheckSuiteConclusionFailure, CommitStatePending, true},
-		{"/check-enforcer evaluate", CheckSuiteConclusionTimedOut, CommitStatePending, true},
-		{"/check-enforcer evaluate", CheckSuiteConclusionNeutral, CommitStatePending, true},
-		{"/check-enforcer evaluate", CheckSuiteConclusionStale, CommitStatePending, true},
-		{"/check-enforcer evaluate", "", CommitStatePending, true},
-		{"/check-enforcer foobar", "", "", false},
-		{"/azp run", "", "", false},
-		{";;;;;;;;;;;;;;;;;;;;;;;;;;;", "", "", false},
+		{"/check-enforcer override", CheckSuiteConclusionSuccess, CommitStateSuccess, true, false},
+		{"/check-enforcer override", CheckSuiteConclusionFailure, CommitStateSuccess, true, false},
+		{"   /check-enforcer   override   ", CheckSuiteConclusionFailure, CommitStateSuccess, true, false},
+		{"/check-enforcer reset", CheckSuiteConclusionSuccess, CommitStateSuccess, true, false},
+		{"/check-enforcer reset", CheckSuiteConclusionFailure, CommitStatePending, true, false},
+		{"/check-enforcer evaluate", CheckSuiteConclusionSuccess, CommitStateSuccess, true, false},
+		{"/check-enforcer evaluate", CheckSuiteConclusionFailure, CommitStatePending, true, false},
+		{"/check-enforcer evaluate", CheckSuiteConclusionTimedOut, CommitStatePending, true, false},
+		{"/check-enforcer evaluate", CheckSuiteConclusionNeutral, CommitStatePending, true, false},
+		{"/check-enforcer evaluate", CheckSuiteConclusionStale, CommitStatePending, true, false},
+		{"/check-enforcer evaluate", "", CommitStatePending, true, true},
+		{"/check-enforcer reset", "", CommitStatePending, true, true},
+		{"/check-enforcer help", "", "", false, true},
+		{"/check-enforcerevaluate", "", "", false, false},
+		{"/check-enforcer foobar", "", "", false, true},
+		{"/check-enforcer foobar bar bar", "", "", false, true},
+		{"/azp run", "", "", false, false},
+		{";;;;;;;;;;;;;;;;;;;;;;;;;;;", "", "", false, false},
 	}
 	for _, tc := range cases {
 		testCommentCase(t, tc, payloads, ic, pr)
@@ -120,6 +130,7 @@ func TestComments(t *testing.T) {
 
 func testCommentCase(t *testing.T, tc testCommentCaseConfig, payloads Payloads, ic *IssueCommentWebhook, pr *PullRequest) {
 	postedStatus := false
+	postedComment := false
 
 	csResponse := strings.ReplaceAll(
 		string(payloads.CheckSuiteResponse),
@@ -134,10 +145,29 @@ func testCommentCase(t *testing.T, tc testCommentCaseConfig, payloads Payloads, 
 			response = []byte(csResponse)
 		} else if strings.Contains(pr.StatusesUrl, r.URL.String()) {
 			response = payloads.StatusResponse
-			assert.Equal(t, "POST", r.Method)
-			status := getBody(t, r)
+			assert.Equal(t, "POST", r.Method, "Post new status")
+			status := getStatusBody(t, r)
 			assert.Equal(t, tc.ExpectedState, status.State, "TestCase %s", tc.Comment)
 			postedStatus = true
+		} else if strings.Contains(ic.GetCommentsUrl(), r.URL.String()) {
+			response = payloads.NewCommentResponse
+			assert.Equal(t, "POST", r.Method, fmt.Sprintf("POST new comment for command '%s'", tc.Comment))
+			body, err := ioutil.ReadAll(r.Body)
+			assert.NoError(t, err)
+			if tc.Comment == "/check-enforcer evaluate" || tc.Comment == "/check-enforcer reset" {
+				noPipelineText, err := ioutil.ReadFile("./comments/no_pipelines.txt")
+				assert.NoError(t, err)
+				expectedBody, err := NewIssueCommentBody(string(noPipelineText))
+				assert.NoError(t, err)
+				assert.Equal(t, string(expectedBody), string(body), fmt.Sprintf("Comment body for command '%s'", tc.Comment))
+			} else {
+				helpText, err := ioutil.ReadFile("./comments/help.txt")
+				assert.NoError(t, err)
+				expectedBody, err := NewIssueCommentBody(string(helpText))
+				assert.NoError(t, err)
+				assert.Equal(t, string(expectedBody), string(body), fmt.Sprintf("Comment body for command '%s'", tc.Comment))
+			}
+			postedComment = true
 		} else {
 			assert.Fail(t, "Unexpected request to "+r.URL.String())
 		}
@@ -153,10 +183,11 @@ func testCommentCase(t *testing.T, tc testCommentCaseConfig, payloads Payloads, 
 
 	err = handleEvent(gh, []byte(replaced))
 	assert.NoError(t, err)
-	assert.Equal(t, tc.PostStatus, postedStatus, "Should POST status")
+	assert.Equal(t, tc.PostStatus, postedStatus, fmt.Sprintf("Should POST status for command '%s'", tc.Comment))
+	assert.Equal(t, tc.PostComment, postedComment, fmt.Sprintf("Should POST comment for command '%s'", tc.Comment))
 }
 
-func getBody(t *testing.T, r *http.Request) StatusBody {
+func getStatusBody(t *testing.T, r *http.Request) StatusBody {
 	body, err := ioutil.ReadAll(r.Body)
 	assert.NoError(t, err)
 	status := StatusBody{}

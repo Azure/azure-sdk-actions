@@ -120,7 +120,7 @@ func sanitizeComment(comment string) string {
 
 func getCheckEnforcerCommand(comment string) string {
 	comment = sanitizeComment(comment)
-	baseCommand := "/check-enforcer"
+	baseCommand := "/check-enforcer "
 
 	if !strings.HasPrefix(comment, baseCommand) {
 		fmt.Println(fmt.Sprintf("Skipping comment that does not start with '%s'", baseCommand))
@@ -131,15 +131,15 @@ func getCheckEnforcerCommand(comment string) string {
 	matches := re.FindStringSubmatch(comment)
 	if len(matches) >= 1 {
 		command := matches[1]
-		if command == "override" || command == "evaluate" || command == "reset" {
+		if command == "override" || command == "evaluate" || command == "reset" || command == "help" {
 			fmt.Println("Parsed check enforcer command", command)
 			return command
 		}
-		fmt.Println("Supported commands are 'override', 'evaluate', or 'reset' but found:", command)
+		fmt.Println("Supported commands are 'override', 'evaluate', 'reset', or 'help' but found:", command)
 		return command
 	} else {
-		fmt.Println("Command does not match format '/check-enforcer [override|reset|evaluate]'")
-		return ""
+		fmt.Println("Command does not match format '/check-enforcer [override|reset|evaluate|help]'")
+		return "UNKNOWN"
 	}
 }
 
@@ -162,7 +162,14 @@ func handleComment(gh *GithubClient, ic *IssueCommentWebhook) error {
 		_, conclusion, err := gh.GetCheckSuiteStatus(pr)
 		handleError(err)
 
-		if IsCheckSuiteSucceeded(conclusion) {
+		if IsCheckSuiteNoMatch(conclusion) {
+			noPipelineText, err := ioutil.ReadFile("./comments/no_pipelines.txt")
+			handleError(err)
+			err = gh.CreateIssueComment(ic.GetCommentsUrl(), string(noPipelineText))
+			handleError(err)
+			err = gh.SetStatus(pr.StatusesUrl, newPendingBody())
+			handleError(err)
+		} else if IsCheckSuiteSucceeded(conclusion) {
 			return gh.SetStatus(pr.StatusesUrl, newSucceededBody())
 		} else if IsCheckSuiteFailed(conclusion) {
 			// Mark as pending with link to action run even on failure, to maintain
@@ -172,8 +179,13 @@ func handleComment(gh *GithubClient, ic *IssueCommentWebhook) error {
 			return gh.SetStatus(pr.StatusesUrl, newPendingBody())
 		}
 	} else {
-		return nil
+		helpText, err := ioutil.ReadFile("./comments/help.txt")
+		handleError(err)
+		err = gh.CreateIssueComment(ic.GetCommentsUrl(), string(helpText))
+		handleError(err)
 	}
+
+	return nil
 }
 
 func handleCheckSuite(gh *GithubClient, cs *CheckSuiteWebhook) error {

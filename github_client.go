@@ -137,6 +137,34 @@ func (gh *GithubClient) GetCheckSuiteStatus(pr PullRequest) (CheckSuiteStatus, C
 	return "", "", nil
 }
 
+func (gh *GithubClient) CreateIssueComment(commentsUrl string, body string) error {
+	target, err := gh.getUrl(commentsUrl)
+	if err != nil {
+		return nil
+	}
+
+	fmt.Println("Creating new issue comment with contents:")
+	fmt.Println("=====================================")
+	fmt.Println(body)
+	fmt.Println("=====================================")
+
+	reqBody, err := NewIssueCommentBody(body)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("POST", target.String(), bytes.NewReader(reqBody))
+	if err != nil {
+		return nil
+	}
+
+	gh.setHeaders(req)
+
+	fmt.Println("POST to", target.String())
+	_, err = gh.request(req)
+	return err
+}
+
 func (gh *GithubClient) request(req *http.Request) ([]byte, error) {
 	resp, err := gh.client.Do(req)
 	if err != nil {

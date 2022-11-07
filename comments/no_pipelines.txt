@@ -1,0 +1,5 @@
+Check Enforcer evaluate was requested, but there are no Azure Pipelines configured to trigger for the changed files.
+
+If you are initializing a new service, follow the [pipeline setup docs]( https://dev.azure.com/azure-sdk/internal/_wiki/wikis/internal.wiki/55/Pipelines?anchor=creating-pipelines-for-new-services) (internal). If no Azure Pipelines are desired, run `/check-enforcer override`.
+
+For help using check enforcer, see https://aka.ms/azsdk/checkenforcer
