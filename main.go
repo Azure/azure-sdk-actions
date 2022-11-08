@@ -120,14 +120,14 @@ func sanitizeComment(comment string) string {
 
 func getCheckEnforcerCommand(comment string) string {
 	comment = sanitizeComment(comment)
-	baseCommand := "/check-enforcer "
+	baseCommand := "/check-enforcer"
 
 	if !strings.HasPrefix(comment, baseCommand) {
 		fmt.Println(fmt.Sprintf("Skipping comment that does not start with '%s'", baseCommand))
 		return ""
 	}
 
-	re := regexp.MustCompile(`\s*` + baseCommand + `\s*([A-z]*)`)
+	re := regexp.MustCompile(`\s*` + baseCommand + `\s+([A-z]*)`)
 	matches := re.FindStringSubmatch(comment)
 	if len(matches) >= 1 {
 		command := matches[1]

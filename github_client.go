@@ -140,7 +140,7 @@ func (gh *GithubClient) GetCheckSuiteStatus(pr PullRequest) (CheckSuiteStatus, C
 func (gh *GithubClient) CreateIssueComment(commentsUrl string, body string) error {
 	target, err := gh.getUrl(commentsUrl)
 	if err != nil {
-		return nil
+		return err
 	}
 
 	fmt.Println("Creating new issue comment with contents:")
@@ -155,7 +155,7 @@ func (gh *GithubClient) CreateIssueComment(commentsUrl string, body string) erro
 
 	req, err := http.NewRequest("POST", target.String(), bytes.NewReader(reqBody))
 	if err != nil {
-		return nil
+		return err
 	}
 
 	gh.setHeaders(req)
