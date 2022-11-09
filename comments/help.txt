@@ -1,0 +1,8 @@
+For help using check enforcer, see https://aka.ms/azsdk/checkenforcer
+
+Available commands:
+  - `/check-enforcer evaluate` - Re-evaluate existing pipeline statuses for PR
+  - `/check-enforcer override` - Ignore any pipeline missing or failed statuses for PR
+  - `/check-enforcer help` - Add this comment
+
+If you are initializing a new service, follow the [new service docs](https://aka.ms/azsdk/checkenforcer#onboarding-a-new-service). If no Azure Pipelines are desired, run `/check-enforcer override`.
