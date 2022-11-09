@@ -63,7 +63,7 @@ Often, new services do not have validation pipelines associated with them, in or
 This will run a pipeline that analyzes the source tree and creates the pipelines necessary to build and validate your pull request. Once the pipeline has been created you can trigger the pipeline using the following comment:
 
 ```
-/azp run js - [service] - ci
+/azp run [lang] - [service] - ci
 ```
 
 For more detailed information about service onboarding see [pipeline setup docs]( https://dev.azure.com/azure-sdk/internal/_wiki/wikis/internal.wiki/55/Pipelines?anchor=creating-pipelines-for-new-services) (internal).

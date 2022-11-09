@@ -58,12 +58,12 @@ func TestCheckSuite(t *testing.T) {
 
 	postedStatus := false
 
-	fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Contains(t, cs.GetStatusesUrl(), r.URL.String())
-		assert.Contains(t, r.URL.Path, cs.CheckSuite.HeadSha)
+	fn := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		assert.Contains(t, cs.GetStatusesUrl(), req.URL.String())
+		assert.Contains(t, req.URL.Path, cs.CheckSuite.HeadSha)
 
-		assert.Equal(t, "POST", r.Method)
-		status := getStatusBody(t, r)
+		assert.Equal(t, "POST", req.Method)
+		status := getStatusBody(t, req)
 		assert.Equal(t, status.State, CommitStateSuccess)
 		postedStatus = true
 
@@ -88,20 +88,20 @@ func TestCheckSuite(t *testing.T) {
 }
 
 type testCommentCaseConfig struct {
-	Comment       string
-	Conclusion    CheckSuiteConclusion
-	ExpectedState CommitState
-	PostStatus    bool
-	PostComment   bool
+	InputComment      string
+	InjectConclusion  CheckSuiteConclusion
+	ExpectedState     CommitState
+	ShouldPostStatus  bool
+	ShouldPostComment bool
 }
 
 func TestComments(t *testing.T) {
 	payloads, err := getPayloads()
 	assert.NoError(t, err)
-	ic := NewIssueCommentWebhook(payloads.IssueCommentEvent)
-	assert.NotEmpty(t, ic)
-	pr := NewPullRequest(payloads.PullRequestResponse)
-	assert.NotEmpty(t, pr)
+	issueCommentEvent := NewIssueCommentWebhook(payloads.IssueCommentEvent)
+	assert.NotEmpty(t, issueCommentEvent)
+	pullRequestResponse := NewPullRequest(payloads.PullRequestResponse)
+	assert.NotEmpty(t, pullRequestResponse)
 
 	cases := []testCommentCaseConfig{
 		{"/check-enforcer override", CheckSuiteConclusionSuccess, CommitStateSuccess, true, false},
@@ -124,52 +124,52 @@ func TestComments(t *testing.T) {
 		{";;;;;;;;;;;;;;;;;;;;;;;;;;;", "", "", false, false},
 	}
 	for _, tc := range cases {
-		testCommentCase(t, tc, payloads, ic, pr)
+		testCommentCase(t, tc, payloads, issueCommentEvent, pullRequestResponse)
 	}
 }
 
-func testCommentCase(t *testing.T, tc testCommentCaseConfig, payloads Payloads, ic *IssueCommentWebhook, pr *PullRequest) {
+func testCommentCase(t *testing.T, tc testCommentCaseConfig, payloads Payloads, issueCommentEvent *IssueCommentWebhook, pullRequestResponse *PullRequest) {
 	postedStatus := false
 	postedComment := false
 
 	csResponse := strings.ReplaceAll(
 		string(payloads.CheckSuiteResponse),
 		`"conclusion": "neutral"`,
-		fmt.Sprintf("\"conclusion\": \"%s\"", tc.Conclusion))
+		fmt.Sprintf("\"conclusion\": \"%s\"", tc.InjectConclusion))
 
-	fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	fn := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		response := []byte{}
-		if strings.Contains(ic.GetPullsUrl(), r.URL.String()) {
+		if strings.Contains(issueCommentEvent.GetPullsUrl(), req.URL.String()) {
 			response = payloads.PullRequestResponse
-		} else if strings.Contains(pr.GetCheckSuiteUrl(), r.URL.String()) {
+		} else if strings.Contains(pullRequestResponse.GetCheckSuiteUrl(), req.URL.String()) {
 			response = []byte(csResponse)
-		} else if strings.Contains(pr.StatusesUrl, r.URL.String()) {
+		} else if strings.Contains(pullRequestResponse.StatusesUrl, req.URL.String()) {
 			response = payloads.StatusResponse
-			assert.Equal(t, "POST", r.Method, "Post new status")
-			status := getStatusBody(t, r)
-			assert.Equal(t, tc.ExpectedState, status.State, "TestCase %s", tc.Comment)
+			assert.Equal(t, "POST", req.Method, "Post new status")
+			status := getStatusBody(t, req)
+			assert.Equal(t, tc.ExpectedState, status.State, "TestCase %s", tc.InputComment)
 			postedStatus = true
-		} else if strings.Contains(ic.GetCommentsUrl(), r.URL.String()) {
+		} else if strings.Contains(issueCommentEvent.GetCommentsUrl(), req.URL.String()) {
 			response = payloads.NewCommentResponse
-			assert.Equal(t, "POST", r.Method, fmt.Sprintf("POST new comment for command '%s'", tc.Comment))
-			body, err := ioutil.ReadAll(r.Body)
+			assert.Equal(t, "POST", req.Method, fmt.Sprintf("POST new comment for command '%s'", tc.InputComment))
+			body, err := ioutil.ReadAll(req.Body)
 			assert.NoError(t, err)
-			if tc.Comment == "/check-enforcer evaluate" || tc.Comment == "/check-enforcer reset" {
+			if tc.InputComment == "/check-enforcer evaluate" || tc.InputComment == "/check-enforcer reset" {
 				noPipelineText, err := ioutil.ReadFile("./comments/no_pipelines.txt")
 				assert.NoError(t, err)
 				expectedBody, err := NewIssueCommentBody(string(noPipelineText))
 				assert.NoError(t, err)
-				assert.Equal(t, string(expectedBody), string(body), fmt.Sprintf("Comment body for command '%s'", tc.Comment))
+				assert.Equal(t, string(expectedBody), string(body), fmt.Sprintf("Comment body for command '%s'", tc.InputComment))
 			} else {
 				helpText, err := ioutil.ReadFile("./comments/help.txt")
 				assert.NoError(t, err)
 				expectedBody, err := NewIssueCommentBody(string(helpText))
 				assert.NoError(t, err)
-				assert.Equal(t, string(expectedBody), string(body), fmt.Sprintf("Comment body for command '%s'", tc.Comment))
+				assert.Equal(t, string(expectedBody), string(body), fmt.Sprintf("Comment body for command '%s'", tc.InputComment))
 			}
 			postedComment = true
 		} else {
-			assert.Fail(t, "Unexpected request to "+r.URL.String())
+			assert.Fail(t, "Unexpected request to "+req.URL.String())
 		}
 		w.Write(response)
 	})
@@ -179,16 +179,16 @@ func testCommentCase(t *testing.T, tc testCommentCaseConfig, payloads Payloads, 
 	gh, err := NewGithubClient(server.URL, "", "Octocat App")
 	assert.NoError(t, err)
 
-	replaced := strings.ReplaceAll(string(payloads.IssueCommentEvent), "You are totally right! I'll get this fixed right away.", tc.Comment)
+	replaced := strings.ReplaceAll(string(payloads.IssueCommentEvent), "You are totally right! I'll get this fixed right away.", tc.InputComment)
 
 	err = handleEvent(gh, []byte(replaced))
 	assert.NoError(t, err)
-	assert.Equal(t, tc.PostStatus, postedStatus, fmt.Sprintf("Should POST status for command '%s'", tc.Comment))
-	assert.Equal(t, tc.PostComment, postedComment, fmt.Sprintf("Should POST comment for command '%s'", tc.Comment))
+	assert.Equal(t, tc.ShouldPostStatus, postedStatus, fmt.Sprintf("Should POST status for command '%s'", tc.InputComment))
+	assert.Equal(t, tc.ShouldPostComment, postedComment, fmt.Sprintf("Should POST comment for command '%s'", tc.InputComment))
 }
 
-func getStatusBody(t *testing.T, r *http.Request) StatusBody {
-	body, err := ioutil.ReadAll(r.Body)
+func getStatusBody(t *testing.T, req *http.Request) StatusBody {
+	body, err := ioutil.ReadAll(req.Body)
 	assert.NoError(t, err)
 	status := StatusBody{}
 	assert.NoError(t, json.Unmarshal(body, &status))
