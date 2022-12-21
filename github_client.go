@@ -11,22 +11,22 @@ import (
 )
 
 type GithubClient struct {
-	client    *http.Client
-	token     string
-	BaseUrl   url.URL
-	AppTarget string
+	client     *http.Client
+	token      string
+	BaseUrl    url.URL
+	AppTargets []string
 }
 
-func NewGithubClient(baseUrl string, token string, appTarget string) (*GithubClient, error) {
+func NewGithubClient(baseUrl string, token string, appTargets ...string) (*GithubClient, error) {
 	u, err := url.Parse(baseUrl)
 	if err != nil {
 		return nil, err
 	}
 	return &GithubClient{
-		client:    &http.Client{},
-		BaseUrl:   *u,
-		token:     token,
-		AppTarget: appTarget,
+		client:     &http.Client{},
+		BaseUrl:    *u,
+		token:      token,
+		AppTargets: appTargets,
 	}, nil
 }
 
@@ -102,17 +102,15 @@ func (gh *GithubClient) GetPullRequest(pullsUrl string) (PullRequest, error) {
 	return pr, nil
 }
 
-func (gh *GithubClient) GetCheckSuiteStatus(pr PullRequest) (CheckSuiteStatus, CheckSuiteConclusion, error) {
-	csUrl := pr.GetCheckSuiteUrl()
-
-	target, err := gh.getUrl(csUrl)
+func (gh *GithubClient) GetCheckSuiteStatuses(checkSuiteUrl string) ([]CheckSuite, error) {
+	target, err := gh.getUrl(checkSuiteUrl)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 
 	req, err := http.NewRequest("GET", target.String(), nil)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 
 	gh.setHeaders(req)
@@ -120,21 +118,24 @@ func (gh *GithubClient) GetCheckSuiteStatus(pr PullRequest) (CheckSuiteStatus, C
 	fmt.Println("GET to", target.String())
 	data, err := gh.request(req)
 	if err != nil {
-		return "", "", err
+		return []CheckSuite{}, err
 	}
 	suites := CheckSuites{}
 	if err = json.Unmarshal(data, &suites); err != nil {
-		return "", "", err
+		return nil, err
 	}
+
+	checkSuites := []CheckSuite{}
 
 	for _, cs := range suites.CheckSuites {
-		if cs.App.Name != gh.AppTarget {
-			continue
+		for _, target := range gh.AppTargets {
+			if cs.App.Name == target {
+				checkSuites = append(checkSuites, cs)
+			}
 		}
-		return cs.Status, cs.Conclusion, nil
 	}
 
-	return "", "", nil
+	return checkSuites, nil
 }
 
 func (gh *GithubClient) CreateIssueComment(commentsUrl string, body string) error {
@@ -178,7 +179,7 @@ func (gh *GithubClient) request(req *http.Request) ([]byte, error) {
 	if err != nil {
 		return []byte{}, err
 	}
-	fmt.Println(fmt.Sprintf("%s", data))
+	// fmt.Println(fmt.Sprintf("%s", data))
 
 	if resp.StatusCode >= 400 {
 		return []byte{}, errors.New(fmt.Sprintf("Received http error %d", resp.StatusCode))

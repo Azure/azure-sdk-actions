@@ -114,10 +114,6 @@ type CheckSuiteWebhook struct {
 	Repo       Repo       `json:"repository"`
 }
 
-func IsCheckSuiteNoMatch(conclusion CheckSuiteConclusion) bool {
-	return conclusion == ""
-}
-
 func IsCheckSuiteSucceeded(conclusion CheckSuiteConclusion) bool {
 	return conclusion == CheckSuiteConclusionSuccess
 }
@@ -126,20 +122,8 @@ func IsCheckSuiteFailed(conclusion CheckSuiteConclusion) bool {
 	return conclusion == CheckSuiteConclusionFailure || conclusion == CheckSuiteConclusionTimedOut
 }
 
-func (cs *CheckSuite) IsSucceeded() bool {
-	return IsCheckSuiteSucceeded(cs.Conclusion)
-}
-
-func (cs *CheckSuite) IsFailed() bool {
-	return IsCheckSuiteFailed(cs.Conclusion)
-}
-
-func (csw *CheckSuiteWebhook) IsSucceeded() bool {
-	return csw.CheckSuite.IsSucceeded()
-}
-
-func (csw *CheckSuiteWebhook) IsFailed() bool {
-	return csw.CheckSuite.IsFailed()
+func (csw *CheckSuiteWebhook) GetCheckSuiteUrl() string {
+	return strings.ReplaceAll(csw.Repo.CommitsUrl, "{/sha}", fmt.Sprintf("/%s", csw.CheckSuite.HeadSha)) + "/check-suites"
 }
 
 func (csw *CheckSuiteWebhook) GetStatusesUrl() string {
@@ -163,6 +147,39 @@ func (ic *IssueCommentWebhook) GetPullsUrl() string {
 
 func (ic *IssueCommentWebhook) GetCommentsUrl() string {
 	return ic.Issue.CommentsUrl
+}
+
+type WorkflowRunPullRequestData struct {
+	Url    string `json:"url"`
+	Id     int    `json:"id"`
+	Number int    `json:"number"`
+}
+
+type WorkflowRunWebhook struct {
+	HtmlUrl      string                       `json:"html_url"`
+	HeadSha      string                       `json:"head_sha"`
+	Event        string                       `json:"event"`
+	HeadRepo     Repo                         `json:"head_repository"`
+	PullRequests []WorkflowRunPullRequestData `json:"pull_requests"`
+}
+
+func (wr *WorkflowRunWebhook) GetStatusesUrl() string {
+	return strings.ReplaceAll(wr.HeadRepo.StatusesUrl, "{sha}", wr.HeadSha)
+}
+
+func (wr *WorkflowRunWebhook) GetCheckSuiteUrl() string {
+	return strings.ReplaceAll(wr.HeadRepo.CommitsUrl, "{/sha}", fmt.Sprintf("/%s", wr.HeadSha)) + "/check-suites"
+}
+
+func NewWorkflowRunWebhook(payload []byte) *WorkflowRunWebhook {
+	var wr WorkflowRunWebhook
+	if err := json.Unmarshal(payload, &wr); err != nil {
+		return nil
+	}
+	if wr.HtmlUrl == "" && wr.HeadSha == "" {
+		return nil
+	}
+	return &wr
 }
 
 func NewIssueCommentBody(body string) ([]byte, error) {

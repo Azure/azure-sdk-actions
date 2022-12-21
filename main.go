@@ -13,6 +13,7 @@ import (
 const GithubTokenKey = "GITHUB_TOKEN"
 const CommitStatusContext = "https://aka.ms/azsdk/checkenforcer"
 const AzurePipelinesAppName = "Azure Pipelines"
+const GithubActionsAppName = "Github Actions"
 
 func newPendingBody() StatusBody {
 	return StatusBody{
@@ -58,7 +59,7 @@ func main() {
 		fmt.Println(fmt.Sprintf("WARNING: environment variable '%s' is not set", GithubTokenKey))
 	}
 
-	gh, err := NewGithubClient("https://api.github.com", github_token, AzurePipelinesAppName)
+	gh, err := NewGithubClient("https://api.github.com", github_token, AzurePipelinesAppName, GithubActionsAppName)
 	handleError(err)
 
 	err = handleEvent(gh, payload)
@@ -73,15 +74,19 @@ func handleEvent(gh *GithubClient, payload []byte) error {
 	fmt.Println()
 
 	if ic := NewIssueCommentWebhook(payload); ic != nil {
-		fmt.Println("Handling issue comment event.")
-		err := handleComment(gh, ic)
+		err := handleIssueComment(gh, ic)
 		handleError(err)
 		return nil
 	}
 
 	if cs := NewCheckSuiteWebhook(payload); cs != nil {
-		fmt.Println("Handling check suite event.")
 		err := handleCheckSuite(gh, cs)
+		handleError(err)
+		return nil
+	}
+
+	if wr := NewWorkflowRunWebhook(payload); wr != nil {
+		err := handleWorkflowRun(gh, wr)
 		handleError(err)
 		return nil
 	}
@@ -143,7 +148,9 @@ func getCheckEnforcerCommand(comment string) string {
 	}
 }
 
-func handleComment(gh *GithubClient, ic *IssueCommentWebhook) error {
+func handleIssueComment(gh *GithubClient, ic *IssueCommentWebhook) error {
+	fmt.Println("Handling issue comment event.")
+
 	command := getCheckEnforcerCommand(ic.Comment.Body)
 
 	if command == "" {
@@ -159,25 +166,17 @@ func handleComment(gh *GithubClient, ic *IssueCommentWebhook) error {
 		// request branch is from, which may be a fork.
 		pr, err := gh.GetPullRequest(ic.GetPullsUrl())
 		handleError(err)
-		_, conclusion, err := gh.GetCheckSuiteStatus(pr)
+		checkSuites, err := gh.GetCheckSuiteStatuses(pr.GetCheckSuiteUrl())
 		handleError(err)
 
-		if IsCheckSuiteNoMatch(conclusion) {
+		if checkSuites == nil || len(checkSuites) == 0 {
 			noPipelineText, err := ioutil.ReadFile("./comments/no_pipelines.txt")
 			handleError(err)
 			err = gh.CreateIssueComment(ic.GetCommentsUrl(), string(noPipelineText))
 			handleError(err)
-			err = gh.SetStatus(pr.StatusesUrl, newPendingBody())
-			handleError(err)
-		} else if IsCheckSuiteSucceeded(conclusion) {
-			return gh.SetStatus(pr.StatusesUrl, newSucceededBody())
-		} else if IsCheckSuiteFailed(conclusion) {
-			// Mark as pending with link to action run even on failure, to maintain
-			// consistency with the old check enforcer behavior and avoid confusion for now.
-			return gh.SetStatus(pr.StatusesUrl, newPendingBody())
-		} else {
-			return gh.SetStatus(pr.StatusesUrl, newPendingBody())
 		}
+
+		return handleCheckSuiteConclusions(gh, checkSuites, pr.StatusesUrl)
 	} else {
 		helpText, err := ioutil.ReadFile("./comments/help.txt")
 		handleError(err)
@@ -188,26 +187,69 @@ func handleComment(gh *GithubClient, ic *IssueCommentWebhook) error {
 	return nil
 }
 
+func handleCheckSuiteConclusions(gh *GithubClient, checkSuites []CheckSuite, statusesUrl string) error {
+	successCount := 0
+
+	for _, suite := range checkSuites {
+		fmt.Println(fmt.Sprintf("Check suite conclusion for '%s' is '%s'.", suite.App.Name, suite.Conclusion))
+		if IsCheckSuiteSucceeded(suite.Conclusion) {
+			successCount++
+		}
+	}
+
+	if successCount > 0 && successCount == len(checkSuites) {
+		return gh.SetStatus(statusesUrl, newSucceededBody())
+	}
+
+	// A pending status is redundant with the default status, but it allows us to
+	// add more details to the status check in the UI such as a link back to the
+	// check enforcer run that evaluated pending.
+	return gh.SetStatus(statusesUrl, newPendingBody())
+}
+
 func handleCheckSuite(gh *GithubClient, cs *CheckSuiteWebhook) error {
-	if cs.CheckSuite.App.Name != gh.AppTarget {
-		fmt.Println(fmt.Sprintf(
-			"Check Enforcer only handles check suites from the '%s' app. Found: '%s'",
-			gh.AppTarget,
-			cs.CheckSuite.App.Name))
-		return nil
-	} else if cs.CheckSuite.HeadBranch == "main" {
+	fmt.Println("Handling check suite event.")
+
+	if cs.CheckSuite.HeadBranch == "main" {
 		fmt.Println("Skipping check suite for main branch.")
 		return nil
-	} else if cs.IsSucceeded() {
-		return gh.SetStatus(cs.GetStatusesUrl(), newSucceededBody())
-	} else if cs.IsFailed() {
-		// Mark as pending with link to action run even on failure, to maintain
-		// consistency with the old check enforcer behavior and avoid confusion for now.
-		return gh.SetStatus(cs.GetStatusesUrl(), newPendingBody())
-	} else {
-		fmt.Println("Skipping check suite with conclusion: ", cs.CheckSuite.Conclusion)
+	}
+
+	isRequiredAppTarget := false
+	for _, target := range gh.AppTargets {
+		if cs.CheckSuite.App.Name == target {
+			isRequiredAppTarget = true
+			break
+		}
+	}
+	if !isRequiredAppTarget {
+		fmt.Println(fmt.Sprintf("Check Enforcer does not handle check suites from the '%s' app.", cs.CheckSuite.App.Name))
 		return nil
 	}
+
+	if len(gh.AppTargets) > 1 {
+		checkSuites, err := gh.GetCheckSuiteStatuses(cs.GetCheckSuiteUrl())
+		handleError(err)
+		return handleCheckSuiteConclusions(gh, checkSuites, cs.GetStatusesUrl())
+	} else {
+		return handleCheckSuiteConclusions(gh, []CheckSuite{cs.CheckSuite}, cs.GetStatusesUrl())
+	}
+}
+
+func handleWorkflowRun(gh *GithubClient, workflowRun *WorkflowRunWebhook) error {
+	fmt.Println("Handling workflow run event.")
+	fmt.Println(fmt.Sprintf("Workflow run url: %s", workflowRun.HtmlUrl))
+	fmt.Println(fmt.Sprintf("Workflow run commit: %s", workflowRun.HeadSha))
+
+	if workflowRun.PullRequests == nil || len(workflowRun.PullRequests) == 0 {
+		fmt.Println("Check enforcer only handles workflow_run events for pull requests. Skipping")
+		return nil
+	}
+
+	checkSuites, err := gh.GetCheckSuiteStatuses(workflowRun.GetCheckSuiteUrl())
+	handleError(err)
+
+	return handleCheckSuiteConclusions(gh, checkSuites, workflowRun.GetStatusesUrl())
 }
 
 func help() {
