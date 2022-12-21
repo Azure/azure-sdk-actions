@@ -216,12 +216,13 @@ func TestWorkflowRun(t *testing.T) {
 	assert.NotEmpty(workflowRun)
 
 	var postedStatus CommitState
+	var csResponse string
 
 	fn := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		response := []byte{}
 
 		if strings.Contains(workflowRun.GetCheckSuiteUrl(), req.URL.String()) {
-			response = []byte(payloads.CheckSuiteResponse)
+			response = []byte(csResponse)
 		} else {
 			assert.Contains(workflowRun.GetStatusesUrl(), req.URL.String())
 			assert.Contains(req.URL.Path, workflowRun.HeadSha)
@@ -237,9 +238,11 @@ func TestWorkflowRun(t *testing.T) {
 	server := httptest.NewServer(fn)
 	defer server.Close()
 
-	gh, err := NewGithubClient(server.URL, "", "octocoders-linter")
+	gh, err := NewGithubClient(server.URL, "", "Octocat App")
 	assert.NoError(err)
 
+	csResponse = strings.ReplaceAll(
+		string(payloads.CheckSuiteResponse), `"conclusion": "neutral"`, fmt.Sprintf("\"conclusion\": \"%s\"", CommitStateSuccess))
 	err = handleEvent(gh, payloads.WorkflowRunEvent)
 	assert.NoError(err)
 	assert.Equal(CommitStateSuccess, postedStatus, "Should POST success status")

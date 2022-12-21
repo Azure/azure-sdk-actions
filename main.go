@@ -241,9 +241,9 @@ func handleWorkflowRun(gh *GithubClient, workflowRun *WorkflowRunWebhook) error 
 	fmt.Println(fmt.Sprintf("Workflow run url: %s", workflowRun.HtmlUrl))
 	fmt.Println(fmt.Sprintf("Workflow run commit: %s", workflowRun.HeadSha))
 
-	if workflowRun.PullRequests == nil || len(workflowRun.PullRequests) == 0 {
+	if workflowRun.Event != "pull_request" || workflowRun.PullRequests == nil || len(workflowRun.PullRequests) == 0 {
 		fmt.Println("Check enforcer only handles workflow_run events for pull requests. Skipping")
-		return nil
+		return gh.SetStatus(workflowRun.GetStatusesUrl(), newPendingBody())
 	}
 
 	checkSuites, err := gh.GetCheckSuiteStatuses(workflowRun.GetCheckSuiteUrl())
