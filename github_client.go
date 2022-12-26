@@ -183,7 +183,7 @@ func (gh *GithubClient) request(req *http.Request) ([]byte, error) {
 	if err != nil {
 		return []byte{}, err
 	}
-	// fmt.Println(fmt.Sprintf("%s", data))
+	fmt.Println(fmt.Sprintf("%s", data))
 
 	if resp.StatusCode >= 400 {
 		return []byte{}, errors.New(fmt.Sprintf("Received http error %d", resp.StatusCode))

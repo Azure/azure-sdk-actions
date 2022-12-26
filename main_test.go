@@ -20,6 +20,8 @@ type Payloads struct {
 	MultipleCheckSuiteResponse []byte
 	StatusResponse             []byte
 	NewCommentResponse         []byte
+	NoPipelinesComment         []byte
+	HelpComment                []byte
 }
 
 func getPayloads() (Payloads, error) {
@@ -58,6 +60,14 @@ func getPayloads() (Payloads, error) {
 	if err != nil {
 		return Payloads{}, err
 	}
+	payloads.NoPipelinesComment, err = ioutil.ReadFile("./comments/no_pipelines.txt")
+	if err != nil {
+		return Payloads{}, err
+	}
+	payloads.HelpComment, err = ioutil.ReadFile("./comments/help.txt")
+	if err != nil {
+		return Payloads{}, err
+	}
 
 	return payloads, nil
 }
@@ -68,6 +78,16 @@ func getStatusBody(assert *assert.Assertions, req *http.Request) StatusBody {
 	status := StatusBody{}
 	assert.NoError(json.Unmarshal(body, &status))
 	return status
+}
+
+type TestCheckSuiteCase struct {
+	Description      string
+	AppTargets       []string
+	InjectState1     CommitState
+	InjectState2     CommitState
+	ShouldPostStatus bool
+	ExpectedStatus   CommitState
+	Event            []byte
 }
 
 func NewCheckSuiteTestServer(
@@ -110,16 +130,6 @@ func NewCheckSuiteTestServer(
 	return httptest.NewServer(fn)
 }
 
-type TestCheckSuiteCase struct {
-	Description      string
-	AppTargets       []string
-	InjectState1     CommitState
-	InjectState2     CommitState
-	ShouldPostStatus bool
-	ExpectedStatus   CommitState
-	Event            []byte
-}
-
 func TestCheckSuite(t *testing.T) {
 	assert := assert.New(t)
 	payloads, err := getPayloads()
@@ -127,20 +137,30 @@ func TestCheckSuite(t *testing.T) {
 	var zeroCommitState CommitState
 	singleAppTarget := []string{"octocoders-linter"}
 	multiAppTarget := []string{"Octocat App", "Hexacat App"}
+	noMatchAppTarget := []string{"no-match"}
+	servers := []*httptest.Server{}
 
-	for _, tc := range []TestCheckSuiteCase{
-		{"POST success for single suite", singleAppTarget, CommitStateSuccess, "", true, CommitStateSuccess, payloads.CheckSuiteEvent},
+	for i, tc := range []TestCheckSuiteCase{
+		{"POST pending for single suite unfinished", singleAppTarget, "", "", true, CommitStatePending,
+			[]byte(strings.ReplaceAll(string(payloads.CheckSuiteEvent), `"conclusion": "success"`, fmt.Sprintf("\"conclusion\": \"%s\"", CommitStatePending)))},
+		{"POST pending for single suite failure", singleAppTarget, "", "", true, CommitStatePending,
+			[]byte(strings.ReplaceAll(string(payloads.CheckSuiteEvent), `"conclusion": "success"`, fmt.Sprintf("\"conclusion\": \"%s\"", CommitStateFailure)))},
+		{"POST success for single suite", singleAppTarget, "", "", true, CommitStateSuccess, payloads.CheckSuiteEvent},
+		{"POST pending for no match, single suite", noMatchAppTarget, "", "", true, CommitStatePending, payloads.CheckSuiteEvent},
 		{"skip for main branch", singleAppTarget, CommitStateSuccess, "", false, zeroCommitState, []byte(strings.ReplaceAll(string(payloads.CheckSuiteEvent), `"head_branch": "changes"`, `"head_branch": "main"`))},
-		{"POST pending for multiple suite", multiAppTarget, CommitStateSuccess, CommitStatePending, true, CommitStatePending, payloads.CheckSuiteEvent},
-		{"POST pending for multiple suite 2", multiAppTarget, CommitStatePending, CommitStateSuccess, true, CommitStatePending, payloads.CheckSuiteEvent},
-		{"POST success for multiple suite", multiAppTarget, CommitStateSuccess, CommitStateSuccess, true, CommitStateSuccess, payloads.CheckSuiteEvent},
+		{"POST pending for multiple suites pending", multiAppTarget, CommitStateSuccess, CommitStatePending, true, CommitStatePending, payloads.CheckSuiteEvent},
+		{"POST pending for multiple suites pending 2", multiAppTarget, CommitStatePending, CommitStateSuccess, true, CommitStatePending, payloads.CheckSuiteEvent},
+		{"POST pending for multiple suites failure", multiAppTarget, CommitStateSuccess, CommitStateFailure, true, CommitStatePending, payloads.CheckSuiteEvent},
+		{"POST success for multiple suites", multiAppTarget, CommitStateSuccess, CommitStateSuccess, true, CommitStateSuccess, payloads.CheckSuiteEvent},
 	} {
 		var postedStatus bool
 		var postedState CommitState
 		server := NewCheckSuiteTestServer(assert, payloads, tc.InjectState1, tc.InjectState2, &postedState, &postedStatus)
 		gh, err := NewGithubClient(server.URL, "", tc.AppTargets...)
 		assert.NoError(err, tc.Description)
-		defer server.Close()
+		servers = append(servers, server)
+		defer servers[i].Close()
+		fmt.Println(fmt.Sprintf("\n\n========= %s =========", tc.Description))
 		err = handleEvent(gh, tc.Event)
 		assert.NoError(err, tc.Description)
 		assert.Equal(tc.ShouldPostStatus, postedStatus, tc.Description)
@@ -154,150 +174,187 @@ type TestCommentCase struct {
 	ExpectedState     CommitState
 	ShouldPostStatus  bool
 	ShouldPostComment bool
+	ExpectedComment   string
 	AppTargets        []string
-	TestDescription   string
+	Description       string
+}
+
+func NewCommentTestServer(
+	assert *assert.Assertions,
+	payloads Payloads,
+	inputComment string,
+	injectConclusion CheckSuiteConclusion,
+	expectedState CommitState,
+	postedStatus *bool,
+	postedComment *bool,
+	expectedComment string,
+	description string,
+) *httptest.Server {
+	issueCommentEvent := NewIssueCommentWebhook(payloads.IssueCommentEvent)
+	assert.NotEmpty(issueCommentEvent)
+	pullRequestResponse := NewPullRequest(payloads.PullRequestResponse)
+	assert.NotEmpty(pullRequestResponse)
+
+	fn := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		response := []byte{}
+		if strings.Contains(issueCommentEvent.GetPullsUrl(), req.URL.String()) && req.Method == "GET" {
+			response = payloads.PullRequestResponse
+		} else if strings.Contains(pullRequestResponse.GetCheckSuiteUrl(), req.URL.String()) && req.Method == "GET" {
+			response = []byte(strings.ReplaceAll(
+				string(payloads.CheckSuiteResponse),
+				`"conclusion": "neutral"`,
+				fmt.Sprintf("\"conclusion\": \"%s\"", injectConclusion)))
+		} else if strings.Contains(pullRequestResponse.StatusesUrl, req.URL.String()) && req.Method == "POST" {
+			*postedStatus = true
+			response = payloads.StatusResponse
+			status := getStatusBody(assert, req)
+			assert.Equal(expectedState, status.State, description)
+		} else if strings.Contains(issueCommentEvent.GetCommentsUrl(), req.URL.String()) && req.Method == "POST" {
+			*postedComment = true
+			response = payloads.NewCommentResponse
+			body, err := ioutil.ReadAll(req.Body)
+			assert.NoError(err, description)
+			assert.Equal(expectedComment, string(body), "%s: Comment body for command '%s'", description, inputComment)
+		} else {
+			assert.Fail("%s: Unexpected %s request to '%s'", description, req.Method, req.URL.String())
+		}
+
+		w.Write(response)
+	})
+
+	return httptest.NewServer(fn)
 }
 
 func TestComments(t *testing.T) {
+	assert := assert.New(t)
 	payloads, err := getPayloads()
-	assert.NoError(t, err)
+	assert.NoError(err)
 	issueCommentEvent := NewIssueCommentWebhook(payloads.IssueCommentEvent)
-	assert.NotEmpty(t, issueCommentEvent)
+	assert.NotEmpty(issueCommentEvent)
 	pullRequestResponse := NewPullRequest(payloads.PullRequestResponse)
-	assert.NotEmpty(t, pullRequestResponse)
+	assert.NotEmpty(pullRequestResponse)
+	noPipelinesComment, err := NewIssueCommentBody(string(payloads.NoPipelinesComment))
+	assert.NoError(err)
+	helpComment, err := NewIssueCommentBody(string(payloads.HelpComment))
+	assert.NoError(err)
 
+	servers := []*httptest.Server{}
 	apps := []string{"Octocat App"}
+	noMatchAppTarget := []string{"no-match"}
 
 	cases := []TestCommentCase{
-		{"/check-enforcer override", CheckSuiteConclusionSuccess, CommitStateSuccess, true, false, apps, "override+success"},
-		{"/check-enforcer override", CheckSuiteConclusionFailure, CommitStateSuccess, true, false, apps, "override+failure"},
-		{"   /check-enforcer   override   ", CheckSuiteConclusionFailure, CommitStateSuccess, true, false, apps, "comment spaces"},
-		{"/check-enforcer reset", CheckSuiteConclusionSuccess, CommitStateSuccess, true, false, apps, "reset+success"},
-		{"/check-enforcer reset", CheckSuiteConclusionFailure, CommitStatePending, true, false, apps, "reset+failure"},
-		{"/check-enforcer evaluate", CheckSuiteConclusionSuccess, CommitStateSuccess, true, false, apps, "evaluate+success"},
-		{"/check-enforcer evaluate", CheckSuiteConclusionFailure, CommitStatePending, true, false, apps, "evaluate+failure"},
-		{"/check-enforcer evaluate", CheckSuiteConclusionTimedOut, CommitStatePending, true, false, apps, "evaluate+timeout"},
-		{"/check-enforcer evaluate", CheckSuiteConclusionNeutral, CommitStatePending, true, false, apps, "evaluate+neutral"},
-		{"/check-enforcer evaluate", CheckSuiteConclusionStale, CommitStatePending, true, false, apps, "evaluate+stale"},
-		{"/check-enforcer evaluate", CheckSuiteConclusionSuccess, CommitStatePending, true, true, []string{"NoMatchApp"}, "evaluate+nopipelinematches"},
-		{"/check-enforcer reset", CheckSuiteConclusionSuccess, CommitStatePending, true, true, []string{"NoMatchApp"}, "reset+nopipelinematches"},
-		{"/check-enforcer help", "", "", false, true, apps, "help"},
-		{"/check-enforcerevaluate", "", "", false, true, apps, "missing space"},
-		{"/check-enforcer foobar", "", "", false, true, apps, "invalid command"},
-		{"/check-enforcer foobar bar bar", "", "", false, true, apps, "invalid command+args"},
-		{"/azp run", "", "", false, false, apps, "different command"},
-		{";;;;;;;;;;;;;;;;;;;;;;;;;;;", "", "", false, false, apps, "semicolons"},
+		{"/check-enforcer override", CheckSuiteConclusionSuccess, CommitStateSuccess, true, false, "", apps, "override+success"},
+		{"/check-enforcer override", CheckSuiteConclusionFailure, CommitStateSuccess, true, false, "", apps, "override+failure"},
+		{"   /check-enforcer   override   ", CheckSuiteConclusionFailure, CommitStateSuccess, true, false, "", apps, "comment spaces"},
+		{"/check-enforcer reset", CheckSuiteConclusionSuccess, CommitStateSuccess, true, false, "", apps, "reset+success"},
+		{"/check-enforcer reset", CheckSuiteConclusionFailure, CommitStatePending, true, false, "", apps, "reset+failure"},
+		{"/check-enforcer evaluate", CheckSuiteConclusionSuccess, CommitStateSuccess, true, false, "", apps, "evaluate+success"},
+		{"/check-enforcer evaluate", CheckSuiteConclusionFailure, CommitStatePending, true, false, "", apps, "evaluate+failure"},
+		{"/check-enforcer evaluate", CheckSuiteConclusionTimedOut, CommitStatePending, true, false, "", apps, "evaluate+timeout"},
+		{"/check-enforcer evaluate", CheckSuiteConclusionNeutral, CommitStatePending, true, false, "", apps, "evaluate+neutral"},
+		{"/check-enforcer evaluate", CheckSuiteConclusionStale, CommitStatePending, true, false, "", apps, "evaluate+stale"},
+		{"/check-enforcer evaluate", CheckSuiteConclusionSuccess, CommitStatePending, true, true,
+			string(noPipelinesComment), noMatchAppTarget, "evaluate+nopipelinematches"},
+		{"/check-enforcer reset", CheckSuiteConclusionSuccess, CommitStatePending, true, true,
+			string(noPipelinesComment), noMatchAppTarget, "reset+nopipelinematches"},
+		{"/check-enforcer help", "", "", false, true, string(helpComment), apps, "help"},
+		{"/check-enforcerevaluate", "", "", false, true, string(helpComment), apps, "missing space"},
+		{"/check-enforcer foobar", "", "", false, true, string(helpComment), apps, "invalid command"},
+		{"/check-enforcer foobar bar bar", "", "", false, true, string(helpComment), apps, "invalid command+args"},
+		{"/azp run", "", "", false, false, "", apps, "different command"},
+		{";;;;;;;;;;;;;;;;;;;;;;;;;;;", "", "", false, false, "", apps, "semicolons"},
 	}
-	for _, tc := range cases {
-		testCommentCase(t, tc, payloads, issueCommentEvent, pullRequestResponse)
+
+	for i, tc := range cases {
+		var postedStatus bool
+		var postedComment bool
+
+		server := NewCommentTestServer(assert, payloads, tc.InputComment, tc.InjectConclusion, tc.ExpectedState,
+			&postedStatus, &postedComment, tc.ExpectedComment, tc.Description)
+		servers = append(servers, server)
+		defer servers[i].Close()
+
+		gh, err := NewGithubClient(server.URL, "", tc.AppTargets...)
+		assert.NoError(err, tc.Description)
+
+		replaced := strings.ReplaceAll(string(payloads.IssueCommentEvent), "You are totally right! I'll get this fixed right away.", tc.InputComment)
+
+		err = handleEvent(gh, []byte(replaced))
+		assert.NoError(err)
+		assert.Equal(tc.ShouldPostStatus, postedStatus, "%s: Should POST status for command '%s'", tc.Description, tc.InputComment)
+		assert.Equal(tc.ShouldPostComment, postedComment, "%s: Should POST comment for command '%s'", tc.Description, tc.InputComment)
 	}
 }
 
-func testCommentCase(t *testing.T, tc TestCommentCase, payloads Payloads, issueCommentEvent *IssueCommentWebhook, pullRequestResponse *PullRequest) {
-	assert := assert.New(t)
-	postedStatus := false
-	postedComment := false
-
-	csResponse := strings.ReplaceAll(
-		string(payloads.CheckSuiteResponse),
-		`"conclusion": "neutral"`,
-		fmt.Sprintf("\"conclusion\": \"%s\"", tc.InjectConclusion))
-
-	fn := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		response := []byte{}
-		if strings.Contains(issueCommentEvent.GetPullsUrl(), req.URL.String()) {
-			response = payloads.PullRequestResponse
-		} else if strings.Contains(pullRequestResponse.GetCheckSuiteUrl(), req.URL.String()) {
-			response = []byte(csResponse)
-		} else if strings.Contains(pullRequestResponse.StatusesUrl, req.URL.String()) {
-			response = payloads.StatusResponse
-			assert.Equal("POST", req.Method, "%s: Post new status", tc.TestDescription)
-			status := getStatusBody(assert, req)
-			assert.Equal(tc.ExpectedState, status.State, tc.TestDescription)
-			postedStatus = true
-		} else if strings.Contains(issueCommentEvent.GetCommentsUrl(), req.URL.String()) {
-			response = payloads.NewCommentResponse
-			assert.Equal("POST", req.Method, "%s: POST new comment for command '%s'", tc.TestDescription, tc.InputComment)
-			body, err := ioutil.ReadAll(req.Body)
-			assert.NoError(err, tc.TestDescription)
-			if tc.InputComment == "/check-enforcer evaluate" || tc.InputComment == "/check-enforcer reset" {
-				noPipelineText, err := ioutil.ReadFile("./comments/no_pipelines.txt")
-				assert.NoError(err, tc.TestDescription)
-				expectedBody, err := NewIssueCommentBody(string(noPipelineText))
-				assert.NoError(err, tc.TestDescription)
-				assert.Equal(string(expectedBody), string(body), "%s: Comment body for command '%s'", tc.TestDescription, tc.InputComment)
-			} else {
-				helpText, err := ioutil.ReadFile("./comments/help.txt")
-				assert.NoError(err, tc.TestDescription)
-				expectedBody, err := NewIssueCommentBody(string(helpText))
-				assert.NoError(err, tc.TestDescription)
-				assert.Equal(string(expectedBody), string(body), "%s: Comment body for command '%s'", tc.TestDescription, tc.InputComment)
-			}
-			postedComment = true
-		} else {
-			assert.Fail("Unexpected request to "+req.URL.String(), tc.TestDescription)
-		}
-		w.Write(response)
-	})
-	server := httptest.NewServer(fn)
-	defer server.Close()
-
-	gh, err := NewGithubClient(server.URL, "", tc.AppTargets...)
-	assert.NoError(err, tc.TestDescription)
-
-	replaced := strings.ReplaceAll(string(payloads.IssueCommentEvent), "You are totally right! I'll get this fixed right away.", tc.InputComment)
-
-	err = handleEvent(gh, []byte(replaced))
-	assert.NoError(err)
-	assert.Equal(tc.ShouldPostStatus, postedStatus, "%s: Should POST status for command '%s'", tc.TestDescription, tc.InputComment)
-	assert.Equal(tc.ShouldPostComment, postedComment, "%s: Should POST comment for command '%s'", tc.TestDescription, tc.InputComment)
+type WorkflowRunCase struct {
+	Event              []byte
+	CheckSuiteResponse []byte
+	ExpectedState      CommitState
+	Description        string
 }
 
-func TestWorkflowRun(t *testing.T) {
-	// TODO: Add tests that check the multiple app case, with calling out to check-suites instead of just the
-	// webhook event data. Same thing for workflow run
-	assert := assert.New(t)
-	payloads, err := getPayloads()
-	assert.NoError(err)
+func NewWorkflowRunTestServer(
+	assert *assert.Assertions,
+	payloads Payloads,
+	checkSuiteResponse []byte,
+	postedState *CommitState,
+	description string,
+) *httptest.Server {
 	workflowRun := NewWorkflowRunWebhook(payloads.WorkflowRunEvent)
 	assert.NotEmpty(workflowRun)
 
-	var postedStatus CommitState
-	var csResponse string
-
 	fn := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		response := []byte{}
 
-		if strings.Contains(workflowRun.GetCheckSuiteUrl(), req.URL.String()) {
-			response = []byte(csResponse)
-		} else {
-			assert.Contains(workflowRun.GetStatusesUrl(), req.URL.String())
+		if strings.Contains(workflowRun.GetCheckSuiteUrl(), req.URL.String()) && req.Method == "GET" {
+			response = checkSuiteResponse
+		} else if strings.Contains(workflowRun.GetStatusesUrl(), req.URL.String()) && req.Method == "POST" {
 			assert.Contains(req.URL.Path, workflowRun.HeadSha)
-
-			assert.Equal("POST", req.Method)
 			status := getStatusBody(assert, req)
-			postedStatus = status.State
+			*postedState = status.State
 			response = payloads.StatusResponse
+		} else {
+			assert.Fail("%s: Unexpected %s request to '%s'", description, req.Method, req.URL.String())
 		}
 
 		w.Write(response)
 	})
-	server := httptest.NewServer(fn)
-	defer server.Close()
 
-	gh, err := NewGithubClient(server.URL, "", "Octocat App")
-	assert.NoError(err)
+	return httptest.NewServer(fn)
+}
 
-	csResponse = strings.ReplaceAll(
-		string(payloads.CheckSuiteResponse), `"conclusion": "neutral"`, fmt.Sprintf("\"conclusion\": \"%s\"", CommitStateSuccess))
-	err = handleEvent(gh, payloads.WorkflowRunEvent)
+func TestWorkflowRun(t *testing.T) {
+	assert := assert.New(t)
+	payloads, err := getPayloads()
 	assert.NoError(err)
-	assert.Equal(CommitStateSuccess, postedStatus, "Should POST success status")
+	servers := []*httptest.Server{}
 
-	// Test skip check suite events for runs not from pull requests
-	replaced := strings.ReplaceAll(string(payloads.WorkflowRunEvent), `"event": "pull_request"`, `"event": "push"`)
-	postedStatus = ""
-	err = handleEvent(gh, []byte(replaced))
-	assert.NoError(err)
-	assert.Equal(CommitStatePending, postedStatus, "Should POST pending status")
+	singleCheckSuiteResponse := []byte(strings.ReplaceAll(
+		string(payloads.CheckSuiteResponse), `"conclusion": "neutral"`, fmt.Sprintf("\"conclusion\": \"%s\"", CommitStateSuccess)))
+
+	multipleCheckSuiteResponse := []byte(strings.ReplaceAll(string(payloads.MultipleCheckSuiteResponse),
+		`"conclusion": "neutral"`, fmt.Sprintf("\"conclusion\": \"%s\"", CommitStateSuccess)))
+	multipleCheckSuiteResponsePending := []byte(strings.Replace(string(multipleCheckSuiteResponse),
+		fmt.Sprintf("\"conclusion\": \"%s\"", CommitStateSuccess), fmt.Sprintf("\"conclusion\": \"%s\"", CommitStatePending), 1))
+
+	for i, tc := range []WorkflowRunCase{
+		{payloads.WorkflowRunEvent, singleCheckSuiteResponse, CommitStateSuccess, "Workflow run success"},
+		{payloads.WorkflowRunEvent, multipleCheckSuiteResponse, CommitStateSuccess, "Workflow run multiple success"},
+		{payloads.WorkflowRunEvent, multipleCheckSuiteResponsePending, CommitStatePending, "Workflow run multiple pending"},
+		{[]byte(strings.ReplaceAll(string(payloads.WorkflowRunEvent), `"event": "pull_request"`, `"event": "push"`)),
+			singleCheckSuiteResponse, CommitStatePending, "Workflow run push event"},
+	} {
+		var postedState CommitState
+
+		server := NewWorkflowRunTestServer(assert, payloads, tc.CheckSuiteResponse, &postedState, tc.Description)
+		gh, err := NewGithubClient(server.URL, "", "Octocat App")
+		assert.NoError(err)
+		servers = append(servers, server)
+		defer servers[i].Close()
+
+		err = handleEvent(gh, tc.Event)
+		assert.NoError(err)
+
+		assert.Equal(tc.ExpectedState, postedState, tc.Description)
+	}
 }
