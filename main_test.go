@@ -97,6 +97,7 @@ func NewCheckSuiteTestServer(
 	state2 CommitState,
 	postedState *CommitState,
 	postedStatus *bool,
+	description string,
 ) *httptest.Server {
 	checkSuite := NewCheckSuiteWebhook(payloads.CheckSuiteEvent)
 	assert.NotEmpty(checkSuite)
@@ -104,24 +105,23 @@ func NewCheckSuiteTestServer(
 	fn := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		response := []byte{}
 
-		if strings.Contains(checkSuite.GetCheckSuiteUrl(), req.URL.String()) {
+		if strings.Contains(checkSuite.GetCheckSuiteUrl(), req.URL.String()) && req.Method == "GET" {
+			assert.Contains(req.URL.Path, checkSuite.CheckSuite.HeadSha, description)
 			response = payloads.MultipleCheckSuiteResponse
-			assert.Contains(req.URL.Path, checkSuite.CheckSuite.HeadSha)
 			response = []byte(strings.Replace(string(response),
 				`"conclusion": "neutral"`, fmt.Sprintf("\"conclusion\": \"%s\"", state1), 1))
 			if state2 != "" {
 				response = []byte(strings.Replace(string(response),
 					`"conclusion": "neutral"`, fmt.Sprintf("\"conclusion\": \"%s\"", state2), 1))
 			}
-		} else {
-			response = payloads.StatusResponse
-			assert.Contains(checkSuite.GetStatusesUrl(), req.URL.String())
+		} else if strings.Contains(checkSuite.GetStatusesUrl(), req.URL.String()) && req.Method == "POST" {
 			assert.Contains(req.URL.Path, checkSuite.CheckSuite.HeadSha)
-
-			assert.Equal("POST", req.Method)
 			status := getStatusBody(assert, req)
 			*postedState = status.State
 			*postedStatus = true
+			response = payloads.StatusResponse
+		} else {
+			assert.Fail("%s: Unexpected %s request to '%s'", description, req.Method, req.URL.String())
 		}
 
 		w.Write(response)
@@ -147,15 +147,15 @@ func TestCheckSuite(t *testing.T) {
 			[]byte(strings.ReplaceAll(string(payloads.CheckSuiteEvent), `"conclusion": "success"`, fmt.Sprintf("\"conclusion\": \"%s\"", CommitStateFailure)))},
 		{"POST success for single suite", singleAppTarget, "", "", true, CommitStateSuccess, payloads.CheckSuiteEvent},
 		{"POST pending for no match, single suite", noMatchAppTarget, "", "", true, CommitStatePending, payloads.CheckSuiteEvent},
-		{"skip for main branch", singleAppTarget, CommitStateSuccess, "", false, zeroCommitState, []byte(strings.ReplaceAll(string(payloads.CheckSuiteEvent), `"head_branch": "changes"`, `"head_branch": "main"`))},
 		{"POST pending for multiple suites pending", multiAppTarget, CommitStateSuccess, CommitStatePending, true, CommitStatePending, payloads.CheckSuiteEvent},
 		{"POST pending for multiple suites pending 2", multiAppTarget, CommitStatePending, CommitStateSuccess, true, CommitStatePending, payloads.CheckSuiteEvent},
 		{"POST pending for multiple suites failure", multiAppTarget, CommitStateSuccess, CommitStateFailure, true, CommitStatePending, payloads.CheckSuiteEvent},
 		{"POST success for multiple suites", multiAppTarget, CommitStateSuccess, CommitStateSuccess, true, CommitStateSuccess, payloads.CheckSuiteEvent},
+		{"skip for main branch", singleAppTarget, CommitStateSuccess, "", false, zeroCommitState, []byte(strings.ReplaceAll(string(payloads.CheckSuiteEvent), `"head_branch": "changes"`, `"head_branch": "main"`))},
 	} {
 		var postedStatus bool
 		var postedState CommitState
-		server := NewCheckSuiteTestServer(assert, payloads, tc.InjectState1, tc.InjectState2, &postedState, &postedStatus)
+		server := NewCheckSuiteTestServer(assert, payloads, tc.InjectState1, tc.InjectState2, &postedState, &postedStatus, tc.Description)
 		gh, err := NewGithubClient(server.URL, "", tc.AppTargets...)
 		assert.NoError(err, tc.Description)
 		servers = append(servers, server)
@@ -169,6 +169,7 @@ func TestCheckSuite(t *testing.T) {
 }
 
 type TestCommentCase struct {
+	Description       string
 	InputComment      string
 	InjectConclusion  CheckSuiteConclusion
 	ExpectedState     CommitState
@@ -176,7 +177,6 @@ type TestCommentCase struct {
 	ShouldPostComment bool
 	ExpectedComment   string
 	AppTargets        []string
-	Description       string
 }
 
 func NewCommentTestServer(
@@ -243,26 +243,24 @@ func TestComments(t *testing.T) {
 	noMatchAppTarget := []string{"no-match"}
 
 	cases := []TestCommentCase{
-		{"/check-enforcer override", CheckSuiteConclusionSuccess, CommitStateSuccess, true, false, "", apps, "override+success"},
-		{"/check-enforcer override", CheckSuiteConclusionFailure, CommitStateSuccess, true, false, "", apps, "override+failure"},
-		{"   /check-enforcer   override   ", CheckSuiteConclusionFailure, CommitStateSuccess, true, false, "", apps, "comment spaces"},
-		{"/check-enforcer reset", CheckSuiteConclusionSuccess, CommitStateSuccess, true, false, "", apps, "reset+success"},
-		{"/check-enforcer reset", CheckSuiteConclusionFailure, CommitStatePending, true, false, "", apps, "reset+failure"},
-		{"/check-enforcer evaluate", CheckSuiteConclusionSuccess, CommitStateSuccess, true, false, "", apps, "evaluate+success"},
-		{"/check-enforcer evaluate", CheckSuiteConclusionFailure, CommitStatePending, true, false, "", apps, "evaluate+failure"},
-		{"/check-enforcer evaluate", CheckSuiteConclusionTimedOut, CommitStatePending, true, false, "", apps, "evaluate+timeout"},
-		{"/check-enforcer evaluate", CheckSuiteConclusionNeutral, CommitStatePending, true, false, "", apps, "evaluate+neutral"},
-		{"/check-enforcer evaluate", CheckSuiteConclusionStale, CommitStatePending, true, false, "", apps, "evaluate+stale"},
-		{"/check-enforcer evaluate", CheckSuiteConclusionSuccess, CommitStatePending, true, true,
-			string(noPipelinesComment), noMatchAppTarget, "evaluate+nopipelinematches"},
-		{"/check-enforcer reset", CheckSuiteConclusionSuccess, CommitStatePending, true, true,
-			string(noPipelinesComment), noMatchAppTarget, "reset+nopipelinematches"},
-		{"/check-enforcer help", "", "", false, true, string(helpComment), apps, "help"},
-		{"/check-enforcerevaluate", "", "", false, true, string(helpComment), apps, "missing space"},
-		{"/check-enforcer foobar", "", "", false, true, string(helpComment), apps, "invalid command"},
-		{"/check-enforcer foobar bar bar", "", "", false, true, string(helpComment), apps, "invalid command+args"},
-		{"/azp run", "", "", false, false, "", apps, "different command"},
-		{";;;;;;;;;;;;;;;;;;;;;;;;;;;", "", "", false, false, "", apps, "semicolons"},
+		{"override+success", "/check-enforcer override", CheckSuiteConclusionSuccess, CommitStateSuccess, true, false, "", apps},
+		{"override+failure", "/check-enforcer override", CheckSuiteConclusionFailure, CommitStateSuccess, true, false, "", apps},
+		{"comment spaces", "   /check-enforcer   override   ", CheckSuiteConclusionFailure, CommitStateSuccess, true, false, "", apps},
+		{"reset+success", "/check-enforcer reset", CheckSuiteConclusionSuccess, CommitStateSuccess, true, false, "", apps},
+		{"reset+failure", "/check-enforcer reset", CheckSuiteConclusionFailure, CommitStatePending, true, false, "", apps},
+		{"evaluate+success", "/check-enforcer evaluate", CheckSuiteConclusionSuccess, CommitStateSuccess, true, false, "", apps},
+		{"evaluate+failure", "/check-enforcer evaluate", CheckSuiteConclusionFailure, CommitStatePending, true, false, "", apps},
+		{"evaluate+timeout", "/check-enforcer evaluate", CheckSuiteConclusionTimedOut, CommitStatePending, true, false, "", apps},
+		{"evaluate+neutral", "/check-enforcer evaluate", CheckSuiteConclusionNeutral, CommitStatePending, true, false, "", apps},
+		{"evaluate+stale", "/check-enforcer evaluate", CheckSuiteConclusionStale, CommitStatePending, true, false, "", apps},
+		{"evaluate+nopipelinematches", "/check-enforcer evaluate", CheckSuiteConclusionSuccess, CommitStatePending, true, true, string(noPipelinesComment), noMatchAppTarget},
+		{"reset+nopipelinematches", "/check-enforcer reset", CheckSuiteConclusionSuccess, CommitStatePending, true, true, string(noPipelinesComment), noMatchAppTarget},
+		{"help", "/check-enforcer help", "", "", false, true, string(helpComment), apps},
+		{"missing space", "/check-enforcerevaluate", "", "", false, true, string(helpComment), apps},
+		{"invalid command", "/check-enforcer foobar", "", "", false, true, string(helpComment), apps},
+		{"invalid command+args", "/check-enforcer foobar bar bar", "", "", false, true, string(helpComment), apps},
+		{"different command", "/azp run", "", "", false, false, "", apps},
+		{"semicolons", ";;;;;;;;;;;;;;;;;;;;;;;;;;;", "", "", false, false, "", apps},
 	}
 
 	for i, tc := range cases {
@@ -287,10 +285,10 @@ func TestComments(t *testing.T) {
 }
 
 type WorkflowRunCase struct {
+	Description        string
 	Event              []byte
 	CheckSuiteResponse []byte
 	ExpectedState      CommitState
-	Description        string
 }
 
 func NewWorkflowRunTestServer(
@@ -338,11 +336,11 @@ func TestWorkflowRun(t *testing.T) {
 		fmt.Sprintf("\"conclusion\": \"%s\"", CommitStateSuccess), fmt.Sprintf("\"conclusion\": \"%s\"", CommitStatePending), 1))
 
 	for i, tc := range []WorkflowRunCase{
-		{payloads.WorkflowRunEvent, singleCheckSuiteResponse, CommitStateSuccess, "Workflow run success"},
-		{payloads.WorkflowRunEvent, multipleCheckSuiteResponse, CommitStateSuccess, "Workflow run multiple success"},
-		{payloads.WorkflowRunEvent, multipleCheckSuiteResponsePending, CommitStatePending, "Workflow run multiple pending"},
-		{[]byte(strings.ReplaceAll(string(payloads.WorkflowRunEvent), `"event": "pull_request"`, `"event": "push"`)),
-			singleCheckSuiteResponse, CommitStatePending, "Workflow run push event"},
+		{"Workflow run success", payloads.WorkflowRunEvent, singleCheckSuiteResponse, CommitStateSuccess},
+		{"Workflow run multiple success", payloads.WorkflowRunEvent, multipleCheckSuiteResponse, CommitStateSuccess},
+		{"Workflow run multiple pending", payloads.WorkflowRunEvent, multipleCheckSuiteResponsePending, CommitStatePending},
+		{"Workflow run push event", []byte(strings.ReplaceAll(string(payloads.WorkflowRunEvent), `"event": "pull_request"`, `"event": "push"`)),
+			singleCheckSuiteResponse, CommitStatePending},
 	} {
 		var postedState CommitState
 
