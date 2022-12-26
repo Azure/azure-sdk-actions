@@ -215,24 +215,13 @@ func handleCheckSuite(gh *GithubClient, cs *CheckSuiteWebhook) error {
 		return nil
 	}
 
-	isRequiredAppTarget := false
-	for _, target := range gh.AppTargets {
-		if cs.CheckSuite.App.Name == target {
-			isRequiredAppTarget = true
-			break
-		}
-	}
-	if !isRequiredAppTarget {
-		fmt.Println(fmt.Sprintf("Check Enforcer does not handle check suites from the '%s' app.", cs.CheckSuite.App.Name))
-		return nil
-	}
-
 	if len(gh.AppTargets) > 1 {
 		checkSuites, err := gh.GetCheckSuiteStatuses(cs.GetCheckSuiteUrl())
 		handleError(err)
 		return handleCheckSuiteConclusions(gh, checkSuites, cs.GetStatusesUrl())
 	} else {
-		return handleCheckSuiteConclusions(gh, []CheckSuite{cs.CheckSuite}, cs.GetStatusesUrl())
+		checkSuites := gh.FilterCheckSuiteStatuses([]CheckSuite{cs.CheckSuite})
+		return handleCheckSuiteConclusions(gh, checkSuites, cs.GetStatusesUrl())
 	}
 }
 

@@ -102,6 +102,20 @@ func (gh *GithubClient) GetPullRequest(pullsUrl string) (PullRequest, error) {
 	return pr, nil
 }
 
+func (gh *GithubClient) FilterCheckSuiteStatuses(checkSuites []CheckSuite) []CheckSuite {
+	filteredCheckSuites := []CheckSuite{}
+
+	for _, cs := range checkSuites {
+		for _, target := range gh.AppTargets {
+			if cs.App.Name == target {
+				filteredCheckSuites = append(filteredCheckSuites, cs)
+			}
+		}
+	}
+
+	return filteredCheckSuites
+}
+
 func (gh *GithubClient) GetCheckSuiteStatuses(checkSuiteUrl string) ([]CheckSuite, error) {
 	target, err := gh.getUrl(checkSuiteUrl)
 	if err != nil {
@@ -125,17 +139,7 @@ func (gh *GithubClient) GetCheckSuiteStatuses(checkSuiteUrl string) ([]CheckSuit
 		return nil, err
 	}
 
-	checkSuites := []CheckSuite{}
-
-	for _, cs := range suites.CheckSuites {
-		for _, target := range gh.AppTargets {
-			if cs.App.Name == target {
-				checkSuites = append(checkSuites, cs)
-			}
-		}
-	}
-
-	return checkSuites, nil
+	return gh.FilterCheckSuiteStatuses(suites.CheckSuites), nil
 }
 
 func (gh *GithubClient) CreateIssueComment(commentsUrl string, body string) error {

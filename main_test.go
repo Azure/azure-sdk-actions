@@ -12,13 +12,14 @@ import (
 )
 
 type Payloads struct {
-	CheckSuiteEvent     []byte
-	IssueCommentEvent   []byte
-	WorkflowRunEvent    []byte
-	PullRequestResponse []byte
-	CheckSuiteResponse  []byte
-	StatusResponse      []byte
-	NewCommentResponse  []byte
+	CheckSuiteEvent            []byte
+	IssueCommentEvent          []byte
+	WorkflowRunEvent           []byte
+	PullRequestResponse        []byte
+	CheckSuiteResponse         []byte
+	MultipleCheckSuiteResponse []byte
+	StatusResponse             []byte
+	NewCommentResponse         []byte
 }
 
 func getPayloads() (Payloads, error) {
@@ -45,6 +46,10 @@ func getPayloads() (Payloads, error) {
 	if err != nil {
 		return Payloads{}, err
 	}
+	payloads.MultipleCheckSuiteResponse, err = ioutil.ReadFile("./testpayloads/multiple_check_suite_response.json")
+	if err != nil {
+		return Payloads{}, err
+	}
 	payloads.StatusResponse, err = ioutil.ReadFile("./testpayloads/status_response.json")
 	if err != nil {
 		return Payloads{}, err
@@ -57,53 +62,93 @@ func getPayloads() (Payloads, error) {
 	return payloads, nil
 }
 
-func getStatusBody(t *testing.T, req *http.Request) StatusBody {
+func getStatusBody(assert *assert.Assertions, req *http.Request) StatusBody {
 	body, err := ioutil.ReadAll(req.Body)
-	assert.NoError(t, err)
+	assert.NoError(err)
 	status := StatusBody{}
-	assert.NoError(t, json.Unmarshal(body, &status))
+	assert.NoError(json.Unmarshal(body, &status))
 	return status
+}
+
+func NewCheckSuiteTestServer(
+	assert *assert.Assertions,
+	payloads Payloads,
+	state1 CommitState,
+	state2 CommitState,
+	postedState *CommitState,
+	postedStatus *bool,
+) *httptest.Server {
+	checkSuite := NewCheckSuiteWebhook(payloads.CheckSuiteEvent)
+	assert.NotEmpty(checkSuite)
+
+	fn := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		response := []byte{}
+
+		if strings.Contains(checkSuite.GetCheckSuiteUrl(), req.URL.String()) {
+			response = payloads.MultipleCheckSuiteResponse
+			assert.Contains(req.URL.Path, checkSuite.CheckSuite.HeadSha)
+			response = []byte(strings.Replace(string(response),
+				`"conclusion": "neutral"`, fmt.Sprintf("\"conclusion\": \"%s\"", state1), 1))
+			if state2 != "" {
+				response = []byte(strings.Replace(string(response),
+					`"conclusion": "neutral"`, fmt.Sprintf("\"conclusion\": \"%s\"", state2), 1))
+			}
+		} else {
+			response = payloads.StatusResponse
+			assert.Contains(checkSuite.GetStatusesUrl(), req.URL.String())
+			assert.Contains(req.URL.Path, checkSuite.CheckSuite.HeadSha)
+
+			assert.Equal("POST", req.Method)
+			status := getStatusBody(assert, req)
+			*postedState = status.State
+			*postedStatus = true
+		}
+
+		w.Write(response)
+	})
+
+	return httptest.NewServer(fn)
+}
+
+type TestCheckSuiteCase struct {
+	Description      string
+	AppTargets       []string
+	InjectState1     CommitState
+	InjectState2     CommitState
+	ShouldPostStatus bool
+	ExpectedStatus   CommitState
+	Event            []byte
 }
 
 func TestCheckSuite(t *testing.T) {
 	assert := assert.New(t)
 	payloads, err := getPayloads()
 	assert.NoError(err)
-	cs := NewCheckSuiteWebhook(payloads.CheckSuiteEvent)
-	assert.NotEmpty(cs)
+	var zeroCommitState CommitState
+	singleAppTarget := []string{"octocoders-linter"}
+	multiAppTarget := []string{"Octocat App", "Hexacat App"}
 
-	postedStatus := false
-
-	fn := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		assert.Contains(cs.GetStatusesUrl(), req.URL.String())
-		assert.Contains(req.URL.Path, cs.CheckSuite.HeadSha)
-
-		assert.Equal("POST", req.Method)
-		status := getStatusBody(t, req)
-		assert.Equal(status.State, CommitStateSuccess)
-		postedStatus = true
-
-		w.Write(payloads.StatusResponse)
-	})
-	server := httptest.NewServer(fn)
-	defer server.Close()
-
-	gh, err := NewGithubClient(server.URL, "", "octocoders-linter")
-	assert.NoError(err)
-
-	err = handleEvent(gh, payloads.CheckSuiteEvent)
-	assert.NoError(err)
-	assert.True(postedStatus, "Should POST status")
-
-	// Test skip check suite events for main branch
-	replaced := strings.ReplaceAll(string(payloads.CheckSuiteEvent), `"head_branch": "changes"`, `"head_branch": "main"`)
-	postedStatus = false
-	err = handleEvent(gh, []byte(replaced))
-	assert.NoError(err)
-	assert.False(postedStatus, "Should POST status")
+	for _, tc := range []TestCheckSuiteCase{
+		{"POST success for single suite", singleAppTarget, CommitStateSuccess, "", true, CommitStateSuccess, payloads.CheckSuiteEvent},
+		{"skip for main branch", singleAppTarget, CommitStateSuccess, "", false, zeroCommitState, []byte(strings.ReplaceAll(string(payloads.CheckSuiteEvent), `"head_branch": "changes"`, `"head_branch": "main"`))},
+		{"POST pending for multiple suite", multiAppTarget, CommitStateSuccess, CommitStatePending, true, CommitStatePending, payloads.CheckSuiteEvent},
+		{"POST pending for multiple suite 2", multiAppTarget, CommitStatePending, CommitStateSuccess, true, CommitStatePending, payloads.CheckSuiteEvent},
+		{"POST success for multiple suite", multiAppTarget, CommitStateSuccess, CommitStateSuccess, true, CommitStateSuccess, payloads.CheckSuiteEvent},
+	} {
+		var postedStatus bool
+		var postedState CommitState
+		server := NewCheckSuiteTestServer(assert, payloads, tc.InjectState1, tc.InjectState2, &postedState, &postedStatus)
+		gh, err := NewGithubClient(server.URL, "", tc.AppTargets...)
+		assert.NoError(err, tc.Description)
+		defer server.Close()
+		err = handleEvent(gh, tc.Event)
+		assert.NoError(err, tc.Description)
+		assert.Equal(tc.ShouldPostStatus, postedStatus, tc.Description)
+		assert.Equal(tc.ExpectedStatus, postedState, tc.Description)
+	}
 }
 
-type testCommentCaseConfig struct {
+type TestCommentCase struct {
 	InputComment      string
 	InjectConclusion  CheckSuiteConclusion
 	ExpectedState     CommitState
@@ -123,7 +168,7 @@ func TestComments(t *testing.T) {
 
 	apps := []string{"Octocat App"}
 
-	cases := []testCommentCaseConfig{
+	cases := []TestCommentCase{
 		{"/check-enforcer override", CheckSuiteConclusionSuccess, CommitStateSuccess, true, false, apps, "override+success"},
 		{"/check-enforcer override", CheckSuiteConclusionFailure, CommitStateSuccess, true, false, apps, "override+failure"},
 		{"   /check-enforcer   override   ", CheckSuiteConclusionFailure, CommitStateSuccess, true, false, apps, "comment spaces"},
@@ -148,7 +193,7 @@ func TestComments(t *testing.T) {
 	}
 }
 
-func testCommentCase(t *testing.T, tc testCommentCaseConfig, payloads Payloads, issueCommentEvent *IssueCommentWebhook, pullRequestResponse *PullRequest) {
+func testCommentCase(t *testing.T, tc TestCommentCase, payloads Payloads, issueCommentEvent *IssueCommentWebhook, pullRequestResponse *PullRequest) {
 	assert := assert.New(t)
 	postedStatus := false
 	postedComment := false
@@ -167,7 +212,7 @@ func testCommentCase(t *testing.T, tc testCommentCaseConfig, payloads Payloads, 
 		} else if strings.Contains(pullRequestResponse.StatusesUrl, req.URL.String()) {
 			response = payloads.StatusResponse
 			assert.Equal("POST", req.Method, "%s: Post new status", tc.TestDescription)
-			status := getStatusBody(t, req)
+			status := getStatusBody(assert, req)
 			assert.Equal(tc.ExpectedState, status.State, tc.TestDescription)
 			postedStatus = true
 		} else if strings.Contains(issueCommentEvent.GetCommentsUrl(), req.URL.String()) {
@@ -209,6 +254,8 @@ func testCommentCase(t *testing.T, tc testCommentCaseConfig, payloads Payloads, 
 }
 
 func TestWorkflowRun(t *testing.T) {
+	// TODO: Add tests that check the multiple app case, with calling out to check-suites instead of just the
+	// webhook event data. Same thing for workflow run
 	assert := assert.New(t)
 	payloads, err := getPayloads()
 	assert.NoError(err)
@@ -228,7 +275,7 @@ func TestWorkflowRun(t *testing.T) {
 			assert.Contains(req.URL.Path, workflowRun.HeadSha)
 
 			assert.Equal("POST", req.Method)
-			status := getStatusBody(t, req)
+			status := getStatusBody(assert, req)
 			postedStatus = status.State
 			response = payloads.StatusResponse
 		}
