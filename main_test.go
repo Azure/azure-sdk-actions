@@ -304,10 +304,10 @@ func NewWorkflowRunTestServer(
 	fn := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		response := []byte{}
 
-		if strings.Contains(workflowRun.GetCheckSuiteUrl(), req.URL.String()) && req.Method == "GET" {
+		if strings.Contains(workflowRun.WorkflowRun.GetCheckSuiteUrl(), req.URL.String()) && req.Method == "GET" {
 			response = checkSuiteResponse
-		} else if strings.Contains(workflowRun.GetStatusesUrl(), req.URL.String()) && req.Method == "POST" {
-			assert.Contains(req.URL.Path, workflowRun.HeadSha)
+		} else if strings.Contains(workflowRun.WorkflowRun.GetStatusesUrl(), req.URL.String()) && req.Method == "POST" {
+			assert.Contains(req.URL.Path, workflowRun.WorkflowRun.HeadSha)
 			status := getStatusBody(assert, req)
 			*postedState = status.State
 			response = payloads.StatusResponse

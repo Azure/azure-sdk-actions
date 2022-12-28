@@ -155,7 +155,7 @@ type WorkflowRunPullRequestData struct {
 	Number int    `json:"number"`
 }
 
-type WorkflowRunWebhook struct {
+type WorkflowRun struct {
 	HtmlUrl      string                       `json:"html_url"`
 	HeadSha      string                       `json:"head_sha"`
 	Event        string                       `json:"event"`
@@ -163,11 +163,16 @@ type WorkflowRunWebhook struct {
 	PullRequests []WorkflowRunPullRequestData `json:"pull_requests"`
 }
 
-func (wr *WorkflowRunWebhook) GetStatusesUrl() string {
+type WorkflowRunWebhook struct {
+	Action      string      `json:"action"`
+	WorkflowRun WorkflowRun `json:"workflow_run"`
+}
+
+func (wr *WorkflowRun) GetStatusesUrl() string {
 	return strings.ReplaceAll(wr.HeadRepo.StatusesUrl, "{sha}", wr.HeadSha)
 }
 
-func (wr *WorkflowRunWebhook) GetCheckSuiteUrl() string {
+func (wr *WorkflowRun) GetCheckSuiteUrl() string {
 	return strings.ReplaceAll(wr.HeadRepo.CommitsUrl, "{/sha}", fmt.Sprintf("/%s", wr.HeadSha)) + "/check-suites"
 }
 
@@ -176,7 +181,7 @@ func NewWorkflowRunWebhook(payload []byte) *WorkflowRunWebhook {
 	if err := json.Unmarshal(payload, &wr); err != nil {
 		return nil
 	}
-	if wr.HtmlUrl == "" && wr.HeadSha == "" {
+	if wr.WorkflowRun.HtmlUrl == "" && wr.WorkflowRun.HeadSha == "" {
 		return nil
 	}
 	return &wr

@@ -225,7 +225,8 @@ func handleCheckSuite(gh *GithubClient, cs *CheckSuiteWebhook) error {
 	}
 }
 
-func handleWorkflowRun(gh *GithubClient, workflowRun *WorkflowRunWebhook) error {
+func handleWorkflowRun(gh *GithubClient, webhook *WorkflowRunWebhook) error {
+	workflowRun := webhook.WorkflowRun
 	fmt.Println("Handling workflow run event.")
 	fmt.Println(fmt.Sprintf("Workflow run url: %s", workflowRun.HtmlUrl))
 	fmt.Println(fmt.Sprintf("Workflow run commit: %s", workflowRun.HeadSha))
