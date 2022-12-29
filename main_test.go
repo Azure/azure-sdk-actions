@@ -12,16 +12,17 @@ import (
 )
 
 type Payloads struct {
-	CheckSuiteEvent            []byte
-	IssueCommentEvent          []byte
-	WorkflowRunEvent           []byte
-	PullRequestResponse        []byte
-	CheckSuiteResponse         []byte
-	MultipleCheckSuiteResponse []byte
-	StatusResponse             []byte
-	NewCommentResponse         []byte
-	NoPipelinesComment         []byte
-	HelpComment                []byte
+	CheckSuiteEvent                     []byte
+	IssueCommentEvent                   []byte
+	WorkflowRunEvent                    []byte
+	PullRequestResponse                 []byte
+	CheckSuiteResponse                  []byte
+	MultipleCheckSuiteResponse          []byte
+	MultipleWithEmptyCheckSuiteResponse []byte
+	StatusResponse                      []byte
+	NewCommentResponse                  []byte
+	NoPipelinesComment                  []byte
+	HelpComment                         []byte
 }
 
 func getPayloads() (Payloads, error) {
@@ -49,6 +50,10 @@ func getPayloads() (Payloads, error) {
 		return Payloads{}, err
 	}
 	payloads.MultipleCheckSuiteResponse, err = ioutil.ReadFile("./testpayloads/multiple_check_suite_response.json")
+	if err != nil {
+		return Payloads{}, err
+	}
+	payloads.MultipleWithEmptyCheckSuiteResponse, err = ioutil.ReadFile("./testpayloads/multiple_with_empty_check_suite_response.json")
 	if err != nil {
 		return Payloads{}, err
 	}
@@ -289,6 +294,7 @@ type WorkflowRunCase struct {
 	Event              []byte
 	CheckSuiteResponse []byte
 	ExpectedState      CommitState
+	AppTargets         []string
 }
 
 func NewWorkflowRunTestServer(
@@ -326,6 +332,7 @@ func TestWorkflowRun(t *testing.T) {
 	payloads, err := getPayloads()
 	assert.NoError(err)
 	servers := []*httptest.Server{}
+	apps := []string{"Octocat App"}
 
 	singleCheckSuiteResponse := []byte(strings.ReplaceAll(
 		string(payloads.CheckSuiteResponse), `"conclusion": "neutral"`, fmt.Sprintf("\"conclusion\": \"%s\"", CommitStateSuccess)))
@@ -336,16 +343,18 @@ func TestWorkflowRun(t *testing.T) {
 		fmt.Sprintf("\"conclusion\": \"%s\"", CommitStateSuccess), fmt.Sprintf("\"conclusion\": \"%s\"", CommitStatePending), 1))
 
 	for i, tc := range []WorkflowRunCase{
-		{"Workflow run success", payloads.WorkflowRunEvent, singleCheckSuiteResponse, CommitStateSuccess},
-		{"Workflow run multiple success", payloads.WorkflowRunEvent, multipleCheckSuiteResponse, CommitStateSuccess},
-		{"Workflow run multiple pending", payloads.WorkflowRunEvent, multipleCheckSuiteResponsePending, CommitStatePending},
+		{"Workflow run success", payloads.WorkflowRunEvent, singleCheckSuiteResponse, CommitStateSuccess, apps},
+		{"Workflow run multiple success", payloads.WorkflowRunEvent, multipleCheckSuiteResponse, CommitStateSuccess, apps},
+		{"Workflow run multiple pending", payloads.WorkflowRunEvent, multipleCheckSuiteResponsePending, CommitStatePending, apps},
+		{"Workflow run with empty check run suite", payloads.WorkflowRunEvent, payloads.MultipleWithEmptyCheckSuiteResponse,
+			CommitStateSuccess, []string{"GitHub Actions", "Azure Pipelines"}},
 		{"Workflow run push event", []byte(strings.ReplaceAll(string(payloads.WorkflowRunEvent), `"event": "pull_request"`, `"event": "push"`)),
-			singleCheckSuiteResponse, CommitStatePending},
+			singleCheckSuiteResponse, CommitStatePending, apps},
 	} {
 		var postedState CommitState
 
 		server := NewWorkflowRunTestServer(assert, payloads, tc.CheckSuiteResponse, &postedState, tc.Description)
-		gh, err := NewGithubClient(server.URL, "", "Octocat App")
+		gh, err := NewGithubClient(server.URL, "", tc.AppTargets...)
 		assert.NoError(err)
 		servers = append(servers, server)
 		defer servers[i].Close()

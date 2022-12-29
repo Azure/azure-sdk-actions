@@ -148,6 +148,26 @@ func getCheckEnforcerCommand(comment string) string {
 	}
 }
 
+func setStatusForCheckSuiteConclusions(gh *GithubClient, checkSuites []CheckSuite, statusesUrl string) error {
+	successCount := 0
+
+	for _, suite := range checkSuites {
+		fmt.Println(fmt.Sprintf("Check suite conclusion for '%s' is '%s'.", suite.App.Name, suite.Conclusion))
+		if IsCheckSuiteSucceeded(suite.Conclusion) {
+			successCount++
+		}
+	}
+
+	if successCount > 0 && successCount == len(checkSuites) {
+		return gh.SetStatus(statusesUrl, newSucceededBody())
+	}
+
+	// A pending status is redundant with the default status, but it allows us to
+	// add more details to the status check in the UI such as a link back to the
+	// check enforcer run that evaluated pending.
+	return gh.SetStatus(statusesUrl, newPendingBody())
+}
+
 func handleIssueComment(gh *GithubClient, ic *IssueCommentWebhook) error {
 	fmt.Println("Handling issue comment event.")
 
@@ -176,7 +196,7 @@ func handleIssueComment(gh *GithubClient, ic *IssueCommentWebhook) error {
 			handleError(err)
 		}
 
-		return handleCheckSuiteConclusions(gh, checkSuites, pr.StatusesUrl)
+		return setStatusForCheckSuiteConclusions(gh, checkSuites, pr.StatusesUrl)
 	} else {
 		helpText, err := ioutil.ReadFile("./comments/help.txt")
 		handleError(err)
@@ -185,26 +205,6 @@ func handleIssueComment(gh *GithubClient, ic *IssueCommentWebhook) error {
 	}
 
 	return nil
-}
-
-func handleCheckSuiteConclusions(gh *GithubClient, checkSuites []CheckSuite, statusesUrl string) error {
-	successCount := 0
-
-	for _, suite := range checkSuites {
-		fmt.Println(fmt.Sprintf("Check suite conclusion for '%s' is '%s'.", suite.App.Name, suite.Conclusion))
-		if IsCheckSuiteSucceeded(suite.Conclusion) {
-			successCount++
-		}
-	}
-
-	if successCount > 0 && successCount == len(checkSuites) {
-		return gh.SetStatus(statusesUrl, newSucceededBody())
-	}
-
-	// A pending status is redundant with the default status, but it allows us to
-	// add more details to the status check in the UI such as a link back to the
-	// check enforcer run that evaluated pending.
-	return gh.SetStatus(statusesUrl, newPendingBody())
 }
 
 func handleCheckSuite(gh *GithubClient, cs *CheckSuiteWebhook) error {
@@ -218,10 +218,10 @@ func handleCheckSuite(gh *GithubClient, cs *CheckSuiteWebhook) error {
 	if len(gh.AppTargets) > 1 {
 		checkSuites, err := gh.GetCheckSuiteStatuses(cs.GetCheckSuiteUrl())
 		handleError(err)
-		return handleCheckSuiteConclusions(gh, checkSuites, cs.GetStatusesUrl())
+		return setStatusForCheckSuiteConclusions(gh, checkSuites, cs.GetStatusesUrl())
 	} else {
 		checkSuites := gh.FilterCheckSuiteStatuses([]CheckSuite{cs.CheckSuite})
-		return handleCheckSuiteConclusions(gh, checkSuites, cs.GetStatusesUrl())
+		return setStatusForCheckSuiteConclusions(gh, checkSuites, cs.GetStatusesUrl())
 	}
 }
 
@@ -239,7 +239,7 @@ func handleWorkflowRun(gh *GithubClient, webhook *WorkflowRunWebhook) error {
 	checkSuites, err := gh.GetCheckSuiteStatuses(workflowRun.GetCheckSuiteUrl())
 	handleError(err)
 
-	return handleCheckSuiteConclusions(gh, checkSuites, workflowRun.GetStatusesUrl())
+	return setStatusForCheckSuiteConclusions(gh, checkSuites, workflowRun.GetStatusesUrl())
 }
 
 func help() {

@@ -107,7 +107,15 @@ func (gh *GithubClient) FilterCheckSuiteStatuses(checkSuites []CheckSuite) []Che
 
 	for _, cs := range checkSuites {
 		for _, target := range gh.AppTargets {
-			if cs.App.Name == target {
+			// Ignore auxiliary checks we don't control, e.g. Microsoft Policy Service.
+			// Github creates a check suite for each app with checks:write permissions,
+			// so also ignore any check suites with 0 check runs posted
+			//
+			// TODO: in the case where a check run isn't posted from azure pipelines due to invalid yaml, will this
+			// show up as 0 check runs? If so, how do we differentiate between the following so we don't submit a passing status:
+			//    1. Github Actions CI intended, Azure Pipelines CI NOT detected
+			//    2. Github Actions CI intended, Azure Pipelines CI intended, Azure Pipelines CI invalid yaml
+			if cs.App.Name == target && cs.LatestCheckRunCount > 0 {
 				filteredCheckSuites = append(filteredCheckSuites, cs)
 			}
 		}
@@ -119,12 +127,12 @@ func (gh *GithubClient) FilterCheckSuiteStatuses(checkSuites []CheckSuite) []Che
 func (gh *GithubClient) GetCheckSuiteStatuses(checkSuiteUrl string) ([]CheckSuite, error) {
 	target, err := gh.getUrl(checkSuiteUrl)
 	if err != nil {
-		return nil, err
+		return []CheckSuite{}, err
 	}
 
 	req, err := http.NewRequest("GET", target.String(), nil)
 	if err != nil {
-		return nil, err
+		return []CheckSuite{}, err
 	}
 
 	gh.setHeaders(req)
@@ -136,7 +144,7 @@ func (gh *GithubClient) GetCheckSuiteStatuses(checkSuiteUrl string) ([]CheckSuit
 	}
 	suites := CheckSuites{}
 	if err = json.Unmarshal(data, &suites); err != nil {
-		return nil, err
+		return []CheckSuite{}, err
 	}
 
 	return gh.FilterCheckSuiteStatuses(suites.CheckSuites), nil

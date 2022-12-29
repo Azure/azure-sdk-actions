@@ -75,14 +75,15 @@ type CheckSuites struct {
 }
 
 type CheckSuite struct {
-	Id           int                  `json:"id"`
-	HeadBranch   string               `json:"head_branch"`
-	HeadSha      string               `json:"head_sha"`
-	Status       CheckSuiteStatus     `json:"status"`
-	Conclusion   CheckSuiteConclusion `json:"conclusion"`
-	Url          string               `json:"url"`
-	CheckRunsUrl string               `json:"check_runs_url"`
-	App          App                  `json:"app"`
+	Id                  int                  `json:"id"`
+	HeadBranch          string               `json:"head_branch"`
+	HeadSha             string               `json:"head_sha"`
+	Status              CheckSuiteStatus     `json:"status"`
+	Conclusion          CheckSuiteConclusion `json:"conclusion"`
+	Url                 string               `json:"url"`
+	CheckRunsUrl        string               `json:"check_runs_url"`
+	LatestCheckRunCount int                  `json:"latest_check_runs_count"`
+	App                 App                  `json:"app"`
 }
 
 type App struct {
