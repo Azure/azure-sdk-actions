@@ -167,6 +167,8 @@ func TestCheckSuite(t *testing.T) {
 			true, CommitStateSuccess, payloads.CheckSuiteEvent},
 		{"skip for main branch", singleAppTarget, CheckSuiteConclusionSuccess, "", false, zeroCommitState,
 			[]byte(strings.ReplaceAll(string(payloads.CheckSuiteEvent), `"head_branch": "changes"`, `"head_branch": "main"`))},
+		{"skip for main branch null", singleAppTarget, CheckSuiteConclusionSuccess, "", false, zeroCommitState,
+			[]byte(strings.ReplaceAll(string(payloads.CheckSuiteEvent), `"head_branch": "changes"`, `"head_branch": null`))},
 	} {
 		var postedStatus bool
 		var postedState CommitState
