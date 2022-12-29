@@ -1,4 +1,4 @@
-Check Enforcer evaluate was requested, but no Azure Pipelines or Github Actions have been triggered for the changed files.
+Check Enforcer evaluate was requested, but there are no Azure Pipelines configured to trigger for the changed files.
 
 If you are initializing a new service, follow the [new service docs](https://aka.ms/azsdk/checkenforcer#onboarding-a-new-service). If no Azure Pipelines are desired, run `/check-enforcer override`.
 
