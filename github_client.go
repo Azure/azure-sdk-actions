@@ -11,22 +11,22 @@ import (
 )
 
 type GithubClient struct {
-	client    *http.Client
-	token     string
-	BaseUrl   url.URL
-	AppTarget string
+	client     *http.Client
+	token      string
+	BaseUrl    url.URL
+	AppTargets []string
 }
 
-func NewGithubClient(baseUrl string, token string, appTarget string) (*GithubClient, error) {
+func NewGithubClient(baseUrl string, token string, appTargets ...string) (*GithubClient, error) {
 	u, err := url.Parse(baseUrl)
 	if err != nil {
 		return nil, err
 	}
 	return &GithubClient{
-		client:    &http.Client{},
-		BaseUrl:   *u,
-		token:     token,
-		AppTarget: appTarget,
+		client:     &http.Client{},
+		BaseUrl:    *u,
+		token:      token,
+		AppTargets: appTargets,
 	}, nil
 }
 
@@ -102,17 +102,37 @@ func (gh *GithubClient) GetPullRequest(pullsUrl string) (PullRequest, error) {
 	return pr, nil
 }
 
-func (gh *GithubClient) GetCheckSuiteStatus(pr PullRequest) (CheckSuiteStatus, CheckSuiteConclusion, error) {
-	csUrl := pr.GetCheckSuiteUrl()
+func (gh *GithubClient) FilterCheckSuiteStatuses(checkSuites []CheckSuite) []CheckSuite {
+	filteredCheckSuites := []CheckSuite{}
 
-	target, err := gh.getUrl(csUrl)
+	for _, cs := range checkSuites {
+		for _, target := range gh.AppTargets {
+			// Ignore auxiliary checks we don't control, e.g. Microsoft Policy Service.
+			// Github creates a check suite for each app with checks:write permissions,
+			// so also ignore any check suites with 0 check runs posted
+			//
+			// TODO: in the case where a check run isn't posted from azure pipelines due to invalid yaml, will this
+			// show up as 0 check runs? If so, how do we differentiate between the following so we don't submit a passing status:
+			//    1. Github Actions CI intended, Azure Pipelines CI NOT detected
+			//    2. Github Actions CI intended, Azure Pipelines CI intended, Azure Pipelines CI invalid yaml
+			if cs.App.Name == target && cs.LatestCheckRunCount > 0 {
+				filteredCheckSuites = append(filteredCheckSuites, cs)
+			}
+		}
+	}
+
+	return filteredCheckSuites
+}
+
+func (gh *GithubClient) GetCheckSuiteStatuses(checkSuiteUrl string) ([]CheckSuite, error) {
+	target, err := gh.getUrl(checkSuiteUrl)
 	if err != nil {
-		return "", "", err
+		return []CheckSuite{}, err
 	}
 
 	req, err := http.NewRequest("GET", target.String(), nil)
 	if err != nil {
-		return "", "", err
+		return []CheckSuite{}, err
 	}
 
 	gh.setHeaders(req)
@@ -120,21 +140,14 @@ func (gh *GithubClient) GetCheckSuiteStatus(pr PullRequest) (CheckSuiteStatus, C
 	fmt.Println("GET to", target.String())
 	data, err := gh.request(req)
 	if err != nil {
-		return "", "", err
+		return []CheckSuite{}, err
 	}
 	suites := CheckSuites{}
 	if err = json.Unmarshal(data, &suites); err != nil {
-		return "", "", err
+		return []CheckSuite{}, err
 	}
 
-	for _, cs := range suites.CheckSuites {
-		if cs.App.Name != gh.AppTarget {
-			continue
-		}
-		return cs.Status, cs.Conclusion, nil
-	}
-
-	return "", "", nil
+	return gh.FilterCheckSuiteStatuses(suites.CheckSuites), nil
 }
 
 func (gh *GithubClient) CreateIssueComment(commentsUrl string, body string) error {
