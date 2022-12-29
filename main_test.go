@@ -19,6 +19,7 @@ type Payloads struct {
 	CheckSuiteResponse                  []byte
 	MultipleCheckSuiteResponse          []byte
 	MultipleWithEmptyCheckSuiteResponse []byte
+	SingleWithEmptyCheckSuiteResponse   []byte
 	StatusResponse                      []byte
 	NewCommentResponse                  []byte
 	NoPipelinesComment                  []byte
@@ -57,6 +58,10 @@ func getPayloads() (Payloads, error) {
 	if err != nil {
 		return Payloads{}, err
 	}
+	payloads.SingleWithEmptyCheckSuiteResponse, err = ioutil.ReadFile("./testpayloads/single_with_empty_check_suite_response.json")
+	if err != nil {
+		return Payloads{}, err
+	}
 	payloads.StatusResponse, err = ioutil.ReadFile("./testpayloads/status_response.json")
 	if err != nil {
 		return Payloads{}, err
@@ -86,20 +91,20 @@ func getStatusBody(assert *assert.Assertions, req *http.Request) StatusBody {
 }
 
 type TestCheckSuiteCase struct {
-	Description      string
-	AppTargets       []string
-	InjectState1     CommitState
-	InjectState2     CommitState
-	ShouldPostStatus bool
-	ExpectedStatus   CommitState
-	Event            []byte
+	Description       string
+	AppTargets        []string
+	InjectConclusion1 CheckSuiteConclusion
+	InjectConclusion2 CheckSuiteConclusion
+	ShouldPostStatus  bool
+	ExpectedState     CommitState
+	Event             []byte
 }
 
 func NewCheckSuiteTestServer(
 	assert *assert.Assertions,
 	payloads Payloads,
-	state1 CommitState,
-	state2 CommitState,
+	conclusion1 CheckSuiteConclusion,
+	conclusion2 CheckSuiteConclusion,
 	postedState *CommitState,
 	postedStatus *bool,
 	description string,
@@ -114,10 +119,10 @@ func NewCheckSuiteTestServer(
 			assert.Contains(req.URL.Path, checkSuite.CheckSuite.HeadSha, description)
 			response = payloads.MultipleCheckSuiteResponse
 			response = []byte(strings.Replace(string(response),
-				`"conclusion": "neutral"`, fmt.Sprintf("\"conclusion\": \"%s\"", state1), 1))
-			if state2 != "" {
+				`"conclusion": "neutral"`, fmt.Sprintf("\"conclusion\": \"%s\"", conclusion1), 1))
+			if conclusion2 != "" {
 				response = []byte(strings.Replace(string(response),
-					`"conclusion": "neutral"`, fmt.Sprintf("\"conclusion\": \"%s\"", state2), 1))
+					`"conclusion": "neutral"`, fmt.Sprintf("\"conclusion\": \"%s\"", conclusion2), 1))
 			}
 		} else if strings.Contains(checkSuite.GetStatusesUrl(), req.URL.String()) && req.Method == "POST" {
 			assert.Contains(req.URL.Path, checkSuite.CheckSuite.HeadSha)
@@ -152,15 +157,20 @@ func TestCheckSuite(t *testing.T) {
 			[]byte(strings.ReplaceAll(string(payloads.CheckSuiteEvent), `"conclusion": "success"`, fmt.Sprintf("\"conclusion\": \"%s\"", CommitStateFailure)))},
 		{"POST success for single suite", singleAppTarget, "", "", true, CommitStateSuccess, payloads.CheckSuiteEvent},
 		{"POST pending for no match, single suite", noMatchAppTarget, "", "", true, CommitStatePending, payloads.CheckSuiteEvent},
-		{"POST pending for multiple suites pending", multiAppTarget, CommitStateSuccess, CommitStatePending, true, CommitStatePending, payloads.CheckSuiteEvent},
-		{"POST pending for multiple suites pending 2", multiAppTarget, CommitStatePending, CommitStateSuccess, true, CommitStatePending, payloads.CheckSuiteEvent},
-		{"POST pending for multiple suites failure", multiAppTarget, CommitStateSuccess, CommitStateFailure, true, CommitStatePending, payloads.CheckSuiteEvent},
-		{"POST success for multiple suites", multiAppTarget, CommitStateSuccess, CommitStateSuccess, true, CommitStateSuccess, payloads.CheckSuiteEvent},
-		{"skip for main branch", singleAppTarget, CommitStateSuccess, "", false, zeroCommitState, []byte(strings.ReplaceAll(string(payloads.CheckSuiteEvent), `"head_branch": "changes"`, `"head_branch": "main"`))},
+		{"POST pending for multiple suites pending", multiAppTarget, CheckSuiteConclusionSuccess, CheckSuiteConclusionEmpty,
+			true, CommitStatePending, payloads.CheckSuiteEvent},
+		{"POST pending for multiple suites pending 2", multiAppTarget, CheckSuiteConclusionEmpty, CheckSuiteConclusionSuccess,
+			true, CommitStatePending, payloads.CheckSuiteEvent},
+		{"POST pending for multiple suites failure", multiAppTarget, CheckSuiteConclusionSuccess, CheckSuiteConclusionFailure,
+			true, CommitStatePending, payloads.CheckSuiteEvent},
+		{"POST success for multiple suites", multiAppTarget, CheckSuiteConclusionSuccess, CheckSuiteConclusionSuccess,
+			true, CommitStateSuccess, payloads.CheckSuiteEvent},
+		{"skip for main branch", singleAppTarget, CheckSuiteConclusionSuccess, "", false, zeroCommitState,
+			[]byte(strings.ReplaceAll(string(payloads.CheckSuiteEvent), `"head_branch": "changes"`, `"head_branch": "main"`))},
 	} {
 		var postedStatus bool
 		var postedState CommitState
-		server := NewCheckSuiteTestServer(assert, payloads, tc.InjectState1, tc.InjectState2, &postedState, &postedStatus, tc.Description)
+		server := NewCheckSuiteTestServer(assert, payloads, tc.InjectConclusion1, tc.InjectConclusion2, &postedState, &postedStatus, tc.Description)
 		gh, err := NewGithubClient(server.URL, "", tc.AppTargets...)
 		assert.NoError(err, tc.Description)
 		servers = append(servers, server)
@@ -169,7 +179,7 @@ func TestCheckSuite(t *testing.T) {
 		err = handleEvent(gh, tc.Event)
 		assert.NoError(err, tc.Description)
 		assert.Equal(tc.ShouldPostStatus, postedStatus, tc.Description)
-		assert.Equal(tc.ExpectedStatus, postedState, tc.Description)
+		assert.Equal(tc.ExpectedState, postedState, tc.Description)
 	}
 }
 
@@ -332,24 +342,25 @@ func TestWorkflowRun(t *testing.T) {
 	payloads, err := getPayloads()
 	assert.NoError(err)
 	servers := []*httptest.Server{}
-	apps := []string{"Octocat App"}
 
 	singleCheckSuiteResponse := []byte(strings.ReplaceAll(
 		string(payloads.CheckSuiteResponse), `"conclusion": "neutral"`, fmt.Sprintf("\"conclusion\": \"%s\"", CommitStateSuccess)))
-
 	multipleCheckSuiteResponse := []byte(strings.ReplaceAll(string(payloads.MultipleCheckSuiteResponse),
 		`"conclusion": "neutral"`, fmt.Sprintf("\"conclusion\": \"%s\"", CommitStateSuccess)))
 	multipleCheckSuiteResponsePending := []byte(strings.Replace(string(multipleCheckSuiteResponse),
 		fmt.Sprintf("\"conclusion\": \"%s\"", CommitStateSuccess), fmt.Sprintf("\"conclusion\": \"%s\"", CommitStatePending), 1))
 
 	for i, tc := range []WorkflowRunCase{
-		{"Workflow run success", payloads.WorkflowRunEvent, singleCheckSuiteResponse, CommitStateSuccess, apps},
-		{"Workflow run multiple success", payloads.WorkflowRunEvent, multipleCheckSuiteResponse, CommitStateSuccess, apps},
-		{"Workflow run multiple pending", payloads.WorkflowRunEvent, multipleCheckSuiteResponsePending, CommitStatePending, apps},
+		{"Workflow run success", payloads.WorkflowRunEvent, singleCheckSuiteResponse, CommitStateSuccess, []string{"Octocat App"}},
+		{"Workflow run multiple success", payloads.WorkflowRunEvent, multipleCheckSuiteResponse, CommitStateSuccess, []string{"Octocat App"}},
+		{"Workflow run multiple pending", payloads.WorkflowRunEvent, multipleCheckSuiteResponsePending, CommitStatePending, []string{"Octocat App"}},
 		{"Workflow run with empty check run suite", payloads.WorkflowRunEvent, payloads.MultipleWithEmptyCheckSuiteResponse,
 			CommitStateSuccess, []string{"GitHub Actions", "Azure Pipelines"}},
-		{"Workflow run push event", []byte(strings.ReplaceAll(string(payloads.WorkflowRunEvent), `"event": "pull_request"`, `"event": "push"`)),
-			singleCheckSuiteResponse, CommitStatePending, apps},
+		{"Workflow run single pending", payloads.WorkflowRunEvent, payloads.SingleWithEmptyCheckSuiteResponse,
+			CommitStatePending, []string{"Azure Pipelines"}},
+		{"Workflow run push event",
+			[]byte(strings.ReplaceAll(string(payloads.WorkflowRunEvent), `"event": "pull_request"`, `"event": "push"`)),
+			singleCheckSuiteResponse, CommitStatePending, []string{"Octocat App"}},
 	} {
 		var postedState CommitState
 

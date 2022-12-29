@@ -16,7 +16,7 @@ const (
 
 	IssueCommentActionCreated ActionType = "created"
 
-	CheckSuiteStatusRequested  CheckSuiteStatus = "requested"
+	CheckSuiteStatusQueued     CheckSuiteStatus = "queued"
 	CheckSuiteStatusInProgress CheckSuiteStatus = "in_progress"
 	CheckSuiteStatusCompleted  CheckSuiteStatus = "completed"
 
@@ -27,6 +27,7 @@ const (
 	CheckSuiteConclusionTimedOut       CheckSuiteConclusion = "timed_out"
 	CheckSuiteConclusionActionRequired CheckSuiteConclusion = "action_required"
 	CheckSuiteConclusionStale          CheckSuiteConclusion = "stale"
+	CheckSuiteConclusionEmpty          CheckSuiteConclusion = ""
 )
 
 type ActionType string
