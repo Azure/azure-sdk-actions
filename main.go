@@ -13,7 +13,7 @@ import (
 const GithubTokenKey = "GITHUB_TOKEN"
 const CommitStatusContext = "https://aka.ms/azsdk/checkenforcer"
 const AzurePipelinesAppName = "Azure Pipelines"
-const GithubActionsAppName = "Github Actions"
+const GithubActionsAppName = "GitHub Actions"
 
 func newPendingBody() StatusBody {
 	return StatusBody{
