@@ -360,7 +360,7 @@ func TestWorkflowRun(t *testing.T) {
 			CommitStatePending, []string{"Azure Pipelines"}},
 		{"Workflow run push event",
 			[]byte(strings.ReplaceAll(string(payloads.WorkflowRunEvent), `"event": "pull_request"`, `"event": "push"`)),
-			singleCheckSuiteResponse, CommitStatePending, []string{"Octocat App"}},
+			[]byte{}, "", []string{"Octocat App"}},
 	} {
 		var postedState CommitState
 
