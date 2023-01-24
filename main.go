@@ -210,7 +210,7 @@ func handleIssueComment(gh *GithubClient, ic *IssueCommentWebhook) error {
 func handleCheckSuite(gh *GithubClient, cs *CheckSuiteWebhook) error {
 	fmt.Println("Handling check suite event.")
 
-	if cs.CheckSuite.HeadBranch == "main" || cs.CheckSuite.HeadBranch == "" {
+	if cs.CheckSuite.HeadBranch == "main" {
 		fmt.Println("Skipping check suite for main branch.")
 		return nil
 	}
