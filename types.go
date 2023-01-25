@@ -52,10 +52,10 @@ type PullRequest struct {
 	StatusesUrl string `json:"statuses_url"`
 	Head        struct {
 		Sha  string `json:"sha"`
-		Repo Repo   `json:"repo"`
+		Repo Repo   `json:"repo"` // Head.Repo is the repository/fork containing the new changes
 	} `json:"head"`
 	Base struct {
-		Repo Repo `json:"repo"`
+		Repo Repo `json:"repo"` // Base.Repo is the repository that will be updated
 	} `json:"base"`
 }
 
@@ -140,7 +140,7 @@ type IssueCommentWebhook struct {
 }
 
 func (pr *PullRequest) GetCheckSuiteUrl() string {
-	return strings.ReplaceAll(pr.Head.Repo.CommitsUrl, "{/sha}", fmt.Sprintf("/%s", pr.Head.Sha)) + "/check-suites"
+	return strings.ReplaceAll(pr.Base.Repo.CommitsUrl, "{/sha}", fmt.Sprintf("/%s", pr.Head.Sha)) + "/check-suites"
 }
 
 func (ic *IssueCommentWebhook) GetPullsUrl() string {
@@ -151,18 +151,11 @@ func (ic *IssueCommentWebhook) GetCommentsUrl() string {
 	return ic.Issue.CommentsUrl
 }
 
-type WorkflowRunPullRequestData struct {
-	Url    string `json:"url"`
-	Id     int    `json:"id"`
-	Number int    `json:"number"`
-}
-
 type WorkflowRun struct {
-	HtmlUrl      string                       `json:"html_url"`
-	HeadSha      string                       `json:"head_sha"`
-	Event        string                       `json:"event"`
-	HeadRepo     Repo                         `json:"head_repository"`
-	PullRequests []WorkflowRunPullRequestData `json:"pull_requests"`
+	HtmlUrl string `json:"html_url"`
+	HeadSha string `json:"head_sha"`
+	Event   string `json:"event"`
+	Repo    Repo   `json:"repository"`
 }
 
 type WorkflowRunWebhook struct {
@@ -171,11 +164,11 @@ type WorkflowRunWebhook struct {
 }
 
 func (wr *WorkflowRun) GetStatusesUrl() string {
-	return strings.ReplaceAll(wr.HeadRepo.StatusesUrl, "{sha}", wr.HeadSha)
+	return strings.ReplaceAll(wr.Repo.StatusesUrl, "{sha}", wr.HeadSha)
 }
 
 func (wr *WorkflowRun) GetCheckSuiteUrl() string {
-	return strings.ReplaceAll(wr.HeadRepo.CommitsUrl, "{/sha}", fmt.Sprintf("/%s", wr.HeadSha)) + "/check-suites"
+	return strings.ReplaceAll(wr.Repo.CommitsUrl, "{/sha}", fmt.Sprintf("/%s", wr.HeadSha)) + "/check-suites"
 }
 
 func NewWorkflowRunWebhook(payload []byte) *WorkflowRunWebhook {
