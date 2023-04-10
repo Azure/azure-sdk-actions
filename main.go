@@ -215,6 +215,32 @@ func handleCheckSuite(gh *GithubClient, cs *CheckSuiteWebhook) error {
 		return nil
 	}
 
+
+	eventIsFromSupportedApp := false
+	for _, app := range gh.AppTargets {
+		if app == cs.CheckSuite.App.Name {
+			eventIsFromSupportedApp = true
+			break
+		}
+	}
+
+	// Ignore check suite events from apps that are not in the list of apps to target. This is to avoid
+	// race conditions with Github Actions events that show up in the check suites but are not workflows
+	// we have set to trigger check enforcer via the workflow_dispatch event in the workflow yaml.
+	//
+	// The original issue involved the Github Policy Service check suites causing us to evaluate
+	// Github Event Processor check suites before Azure Pipelines had registered any check suites.
+	// This caused us to return a success status incorrectly because we cannot differentiate
+	// Github Actions check suites intended as CI gates vs. generic runs without calling the check-runs
+	// API, which could many extra API calls per event.
+	if !eventIsFromSupportedApp {
+		fmt.Println("Skipping check suite evaluation for event from ignored github app", cs.CheckSuite.App.Name)
+		// A pending status is redundant with the default status, but it allows us to
+		// add more details to the status check in the UI such as a link back to the
+		// check enforcer run that evaluated pending.
+		return gh.SetStatus(cs.GetStatusesUrl(), newPendingBody())
+	}
+
 	if len(gh.AppTargets) > 1 {
 		checkSuites, err := gh.GetCheckSuiteStatuses(cs.GetCheckSuiteUrl())
 		handleError(err)

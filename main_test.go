@@ -146,7 +146,8 @@ func TestCheckSuite(t *testing.T) {
 	assert.NoError(err)
 	var zeroCommitState CommitState
 	singleAppTarget := []string{"octocoders-linter"}
-	multiAppTarget := []string{"Octocat App", "Hexacat App"}
+	multiAppTargetExcludeEvent := []string{"Octocat App", "Hexacat App"}
+	multiAppTarget := []string{"octocoders-linter", "Octocat App", "Hexacat App"}
 	noMatchAppTarget := []string{"no-match"}
 	servers := []*httptest.Server{}
 
@@ -157,6 +158,8 @@ func TestCheckSuite(t *testing.T) {
 			[]byte(strings.ReplaceAll(string(payloads.CheckSuiteEvent), `"conclusion": "success"`, fmt.Sprintf("\"conclusion\": \"%s\"", CommitStateFailure)))},
 		{"POST success for single suite", singleAppTarget, "", "", true, CommitStateSuccess, payloads.CheckSuiteEvent},
 		{"POST pending for no match, single suite", noMatchAppTarget, "", "", true, CommitStatePending, payloads.CheckSuiteEvent},
+		{"POST pending for no match, multiple suite", multiAppTargetExcludeEvent, CheckSuiteConclusionSuccess, CheckSuiteConclusionSuccess,
+			true, CommitStatePending, payloads.CheckSuiteEvent},
 		{"POST pending for multiple suites pending", multiAppTarget, CheckSuiteConclusionSuccess, CheckSuiteConclusionEmpty,
 			true, CommitStatePending, payloads.CheckSuiteEvent},
 		{"POST pending for multiple suites pending 2", multiAppTarget, CheckSuiteConclusionEmpty, CheckSuiteConclusionSuccess,
