@@ -44,7 +44,7 @@ Check Enforcer is our solution. We use the built-in triggering w/ path filter op
 
 ## Usage
 
-Check Enforcer runs within a github actions context and triggers off two types of events: `check_suite completed` and `issue_comment created`.
+Check Enforcer runs within a github actions context and is triggered by two types of events: `check_suite completed` and `issue_comment created`.
 
 - `check_suite completed` behavior: When a pull request is created, github will show a pending status check for check enforcer based on the branch protection rule configured for the default branch (`main`). A check_suite is the github representation of all `check_runs` (e.g. pipeline jobs) associated with the head commit of the pull request branch. When all registered `check_runs` are completed, a `check_suite completed` event is triggered. The check enforcer github action will run at this time, evaluate the state of the `check_suite` and POST the corresponding state to the check enforcer `statuses` API endpoint for the pull request.
 - `issue_comment created` behavior: When a comment is added to the pull request, check enforcer will check if that comment is a supported [command](#pr-comment-commands). If so, it will perform the corresponding behavior (reset, evaluate or override).
