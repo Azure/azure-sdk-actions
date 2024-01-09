@@ -83,7 +83,7 @@ If Check Enforcer appears to be stuck you can add a comment as follows to re-eva
 /check-enforcer evaluate
 ```
 
-From time to time, Check Enforcer may be blocking a merge because no-check runs are appropriate for the PR. In these cases you can use the following command Check Enforcer rules and park the commit as successful:
+From time to time, Check Enforcer may be blocking a merge because no-check runs are appropriate for the PR. In these cases, you can use the following command Check Enforcer rules and park the commit as successful:
 
 ```
 /check-enforcer override
