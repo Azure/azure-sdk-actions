@@ -8,7 +8,6 @@ runs:
   using: "composite"
   steps:
     - run: |
-        echo "Starting Azure SDK GitHub Event Handler!"
         cd $GITHUB_ACTION_PATH
         cat > ./github_payload.json << 'EOF'
         ${{ toJson(github.event) }}
