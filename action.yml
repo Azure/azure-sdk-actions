@@ -1,4 +1,4 @@
-name: 'Azure SDK GitHub Event Handler'
+name: 'Azure SDK GitHub Event Handler Test'
 description: 'Handle GitHub event'
 inputs:
   token:
