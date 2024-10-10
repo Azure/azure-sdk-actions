@@ -215,7 +215,6 @@ func handleCheckSuite(gh *GithubClient, cs *CheckSuiteWebhook) error {
 		return nil
 	}
 
-
 	eventIsFromSupportedApp := false
 	for _, app := range gh.AppTargets {
 		if app == cs.CheckSuite.App.Name {
