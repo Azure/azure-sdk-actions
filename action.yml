@@ -9,10 +9,7 @@ runs:
   steps:
     - run: |
         cd $GITHUB_ACTION_PATH
-        cat > ./github_payload.json << 'EOF'
-        ${{ toJson(github.event) }}
-        EOF
-        go run . ./github_payload.json
+        go run . $GITHUB_EVENT_PATH
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
