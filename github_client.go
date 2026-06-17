@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
+	"time"
 )
 
 type GithubClient struct {
@@ -66,7 +68,6 @@ func (gh *GithubClient) SetStatus(statusUrl string, status StatusBody) error {
 
 	gh.setHeaders(req)
 
-	fmt.Println("POST to", target.String(), "with state", status.State)
 	_, err = gh.request(req)
 	if err != nil {
 		return err
@@ -88,7 +89,6 @@ func (gh *GithubClient) GetPullRequest(pullsUrl string) (PullRequest, error) {
 
 	gh.setHeaders(req)
 
-	fmt.Println("GET to", target.String())
 	data, err := gh.request(req)
 	if err != nil {
 		return PullRequest{}, err
@@ -137,7 +137,6 @@ func (gh *GithubClient) GetCheckSuiteStatuses(checkSuiteUrl string) ([]CheckSuit
 
 	gh.setHeaders(req)
 
-	fmt.Println("GET to", target.String())
 	data, err := gh.request(req)
 	if err != nil {
 		return []CheckSuite{}, err
@@ -173,12 +172,13 @@ func (gh *GithubClient) CreateIssueComment(commentsUrl string, body string) erro
 
 	gh.setHeaders(req)
 
-	fmt.Println("POST to", target.String())
 	_, err = gh.request(req)
 	return err
 }
 
 func (gh *GithubClient) request(req *http.Request) ([]byte, error) {
+	gh.logRequest(req)
+
 	resp, err := gh.client.Do(req)
 	if err != nil {
 		return []byte{}, err
@@ -186,6 +186,7 @@ func (gh *GithubClient) request(req *http.Request) ([]byte, error) {
 
 	defer resp.Body.Close()
 	fmt.Println("Received", resp.Status)
+	gh.logRateLimit(resp)
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return []byte{}, err
@@ -198,4 +199,75 @@ func (gh *GithubClient) request(req *http.Request) ([]byte, error) {
 	}
 
 	return data, nil
+}
+
+// logRequest logs the outgoing API call in the format:
+//
+//	[github] GET https://api.github.com/... {"body":"..."}
+func (gh *GithubClient) logRequest(req *http.Request) {
+	body := ""
+	if req.GetBody != nil {
+		if reader, err := req.GetBody(); err == nil {
+			defer reader.Close()
+			if data, err := io.ReadAll(reader); err == nil {
+				body = string(data)
+			}
+		}
+	}
+
+	fmt.Println(fmt.Sprintf("[github] %s %s %s", req.Method, req.URL.String(), body))
+}
+
+// logRateLimit extracts the rate limit headers from a response and logs them in
+// the format:
+//
+//	[github] load: 1%, used: 105, remaining: 14895, reset: 00:19:31
+//
+// load is the ratio of used requests to the requests that should have been
+// available by now if usage were spread evenly across the rate limit window. A
+// load over 100% means we are predicted to hit the limit before it resets.
+func (gh *GithubClient) logRateLimit(resp *http.Response) {
+	limitHeader := resp.Header.Get("x-ratelimit-limit")
+	remainingHeader := resp.Header.Get("x-ratelimit-remaining")
+	resetHeader := resp.Header.Get("x-ratelimit-reset")
+
+	if limitHeader == "" || remainingHeader == "" || resetHeader == "" {
+		fmt.Println("[github] missing ratelimit header(s) in response")
+		return
+	}
+
+	limit, err := strconv.Atoi(limitHeader)
+	if err != nil {
+		fmt.Println("[github] invalid x-ratelimit-limit header:", limitHeader)
+		return
+	}
+	remaining, err := strconv.Atoi(remainingHeader)
+	if err != nil {
+		fmt.Println("[github] invalid x-ratelimit-remaining header:", remainingHeader)
+		return
+	}
+	resetUnix, err := strconv.ParseInt(resetHeader, 10, 64)
+	if err != nil {
+		fmt.Println("[github] invalid x-ratelimit-reset header:", resetHeader)
+		return
+	}
+
+	used := limit - remaining
+
+	now := time.Now()
+	reset := time.Unix(resetUnix, 0)
+	// The rate limit window is one hour, so it started one hour before reset.
+	start := reset.Add(-time.Hour)
+	elapsedFraction := now.Sub(start).Seconds() / time.Hour.Seconds()
+
+	// Example: If limit is 1000, and 6 minutes have elapsed (10% of 1 hour),
+	// availableLimit will be 100 (10% of total).
+	availableLimit := float64(limit) * elapsedFraction
+
+	// If load is > 100%, we are "running hot" and predicted to hit the limit
+	// before reset. Keep load < 50% for a safety margin.
+	load := float64(used) / availableLimit
+
+	fmt.Println(fmt.Sprintf("[github] load: %s, used: %d, remaining: %d, reset: %s",
+		toPercent(load), used, remaining, formatDuration(getDuration(now, reset))))
 }
