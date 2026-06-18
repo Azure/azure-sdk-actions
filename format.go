@@ -13,11 +13,11 @@ func toPercent(value float64) string {
 
 // getDuration returns the absolute duration between two times.
 func getDuration(from time.Time, to time.Time) time.Duration {
-	if d := to.Sub(from); d < 0 {
+	d := to.Sub(from)
+	if d < 0 {
 		return -d
-	} else {
-		return d
 	}
+	return d
 }
 
 // formatDuration formats a duration as hh:mm:ss (always zero-padded).
