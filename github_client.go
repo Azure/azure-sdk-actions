@@ -226,30 +226,28 @@ func (gh *GithubClient) logRequest(req *http.Request) {
 // available by now if usage were spread evenly across the rate limit window. A
 // load over 100% means we are predicted to hit the limit before it resets.
 func (gh *GithubClient) logRateLimit(resp *http.Response) {
-	status := fmt.Sprintf("status: %d", resp.StatusCode)
-
 	limitHeader := resp.Header.Get("x-ratelimit-limit")
 	remainingHeader := resp.Header.Get("x-ratelimit-remaining")
 	resetHeader := resp.Header.Get("x-ratelimit-reset")
 
 	if limitHeader == "" || remainingHeader == "" || resetHeader == "" {
-		fmt.Printf("[github] %s, missing ratelimit header(s) in response\n", status)
+		fmt.Println("[github] missing ratelimit header(s) in response")
 		return
 	}
 
 	limit, err := strconv.Atoi(limitHeader)
 	if err != nil {
-		fmt.Printf("[github] %s, invalid x-ratelimit-limit header: %s\n", status, limitHeader)
+		fmt.Println("[github] invalid x-ratelimit-limit header:", limitHeader)
 		return
 	}
 	remaining, err := strconv.Atoi(remainingHeader)
 	if err != nil {
-		fmt.Printf("[github] %s, invalid x-ratelimit-remaining header: %s\n", status, remainingHeader)
+		fmt.Println("[github] invalid x-ratelimit-remaining header:", remainingHeader)
 		return
 	}
 	resetUnix, err := strconv.ParseInt(resetHeader, 10, 64)
 	if err != nil {
-		fmt.Printf("[github] %s, invalid x-ratelimit-reset header: %s\n", status, resetHeader)
+		fmt.Println("[github] invalid x-ratelimit-reset header:", resetHeader)
 		return
 	}
 
@@ -282,6 +280,6 @@ func (gh *GithubClient) logRateLimit(resp *http.Response) {
 	// before reset. Keep load < 50% for a safety margin.
 	load := float64(used) / availableLimit
 
-	fmt.Println(fmt.Sprintf("[github] %s, load: %s, used: %d, remaining: %d, reset: %s",
-		status, toPercent(load), used, remaining, formatDuration(getDuration(now, reset))))
+	fmt.Println(fmt.Sprintf("[github] status: %d, load: %s, used: %d, remaining: %d, reset: %s",
+		resp.StatusCode, toPercent(load), used, remaining, formatDuration(getDuration(now, reset))))
 }
