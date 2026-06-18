@@ -273,6 +273,7 @@ func (gh *GithubClient) logRateLimit(resp *http.Response) {
 	// Example: If limit is 1000, and 6 minutes have elapsed (10% of 1 hour),
 	// availableLimit will be 100 (10% of total).
 	availableLimit := float64(limit) * elapsedFraction
+    // guard against very small limit causing divide-by-zero
 	if availableLimit < 1 {
 		availableLimit = 1
 	}
