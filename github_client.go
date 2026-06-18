@@ -257,13 +257,24 @@ func (gh *GithubClient) logRateLimit(resp *http.Response) {
 
 	now := time.Now()
 	reset := time.Unix(resetUnix, 0)
+
 	// The rate limit window is one hour, so it started one hour before reset.
 	start := reset.Add(-time.Hour)
-	elapsedFraction := now.Sub(start).Seconds() / time.Hour.Seconds()
+	elapsed := now.Sub(start)
+	if elapsed < time.Second {
+		elapsed = time.Second
+	} else if elapsed > time.Hour {
+		elapsed = time.Hour
+	}
+
+	elapsedFraction := elapsed.Seconds() / time.Hour.Seconds()
 
 	// Example: If limit is 1000, and 6 minutes have elapsed (10% of 1 hour),
 	// availableLimit will be 100 (10% of total).
 	availableLimit := float64(limit) * elapsedFraction
+	if availableLimit < 1 {
+		availableLimit = 1
+	}
 
 	// If load is > 100%, we are "running hot" and predicted to hit the limit
 	// before reset. Keep load < 50% for a safety margin.
