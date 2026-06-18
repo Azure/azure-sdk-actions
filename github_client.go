@@ -261,6 +261,7 @@ func (gh *GithubClient) logRateLimit(resp *http.Response) {
 	// The rate limit window is one hour, so it started one hour before reset.
 	start := reset.Add(-time.Hour)
 	elapsed := now.Sub(start)
+    // Guard against clock skew causing time <1s or >1h
 	if elapsed < time.Second {
 		elapsed = time.Second
 	} else if elapsed > time.Hour {
