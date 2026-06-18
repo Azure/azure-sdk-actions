@@ -185,7 +185,7 @@ func (gh *GithubClient) request(req *http.Request) ([]byte, error) {
 	}
 
 	defer resp.Body.Close()
-	gh.logRateLimit(resp)
+	gh.logResponse(resp)
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return []byte{}, err
@@ -217,7 +217,7 @@ func (gh *GithubClient) logRequest(req *http.Request) {
 	fmt.Println(fmt.Sprintf("[github] %s %s %s", req.Method, req.URL.String(), body))
 }
 
-// logRateLimit extracts the rate limit headers from a response and logs them,
+// logResponse extracts the rate limit headers from a response and logs them,
 // prefixed by the response status, in the format:
 //
 //	[github] status: 201, load: 1%, used: 105, remaining: 14895, reset: 00:19:31
@@ -225,7 +225,7 @@ func (gh *GithubClient) logRequest(req *http.Request) {
 // load is the ratio of used requests to the requests that should have been
 // available by now if usage were spread evenly across the rate limit window. A
 // load over 100% means we are predicted to hit the limit before it resets.
-func (gh *GithubClient) logRateLimit(resp *http.Response) {
+func (gh *GithubClient) logResponse(resp *http.Response) {
 	limitHeader := resp.Header.Get("x-ratelimit-limit")
 	remainingHeader := resp.Header.Get("x-ratelimit-remaining")
 	resetHeader := resp.Header.Get("x-ratelimit-reset")
