@@ -158,7 +158,15 @@ func TestCheckSuite(t *testing.T) {
 			[]byte(strings.ReplaceAll(string(payloads.CheckSuiteEvent), `"conclusion": "success"`, fmt.Sprintf("\"conclusion\": \"%s\"", CommitStateFailure)))},
 		{"POST success for single suite", singleAppTarget, "", "", true, CommitStateSuccess, payloads.CheckSuiteEvent},
 		{"POST pending for no match, single suite", noMatchAppTarget, "", "", true, CommitStatePending, payloads.CheckSuiteEvent},
-		{"POST pending for no match, multiple suite", multiAppTargetExcludeEvent, CheckSuiteConclusionSuccess, CheckSuiteConclusionSuccess,
+		// An ignored-app (e.g. Github Policy Service) check_suite completed event must still
+		// re-evaluate the tracked check suites. When all tracked suites have already succeeded
+		// the status must flip to success instead of getting stuck on pending (Azure/azure-dev#9198).
+		{"POST success for ignored app when tracked suites succeeded", multiAppTargetExcludeEvent, CheckSuiteConclusionSuccess, CheckSuiteConclusionSuccess,
+			true, CommitStateSuccess, payloads.CheckSuiteEvent},
+		// Race-condition protection: an ignored-app event where one tracked suite (e.g. Github
+		// Actions) has succeeded but another (e.g. Azure Pipelines) has not yet completed must
+		// remain pending rather than posting a false-positive success.
+		{"POST pending for ignored app when a tracked suite is unfinished", multiAppTargetExcludeEvent, CheckSuiteConclusionSuccess, CheckSuiteConclusionEmpty,
 			true, CommitStatePending, payloads.CheckSuiteEvent},
 		{"POST pending for multiple suites pending", multiAppTarget, CheckSuiteConclusionSuccess, CheckSuiteConclusionEmpty,
 			true, CommitStatePending, payloads.CheckSuiteEvent},

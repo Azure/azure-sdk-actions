@@ -223,21 +223,29 @@ func handleCheckSuite(gh *GithubClient, cs *CheckSuiteWebhook) error {
 		}
 	}
 
-	// Ignore check suite events from apps that are not in the list of apps to target. This is to avoid
-	// race conditions with Github Actions events that show up in the check suites but are not workflows
-	// we have set to trigger check enforcer via the workflow_dispatch event in the workflow yaml.
+	// Do not base the evaluation solely on the check suite from the event payload when it
+	// comes from an app we don't target (e.g. the Microsoft GitHub Policy Service / CLA bot).
+	// Those check suites are not CI gates, and evaluating a single Github Actions check suite
+	// in isolation can return a false-positive success before Azure Pipelines has registered
+	// its own check suite (the original Github Policy Service / Github Event Processor race).
 	//
-	// The original issue involved the Github Policy Service check suites causing us to evaluate
-	// Github Event Processor check suites before Azure Pipelines had registered any check suites.
-	// This caused us to return a success status incorrectly because we cannot differentiate
-	// Github Actions check suites intended as CI gates vs. generic runs without calling the check-runs
-	// API, which could many extra API calls per event.
+	// However, we must still RE-EVALUATE the check suites that actually matter by querying the
+	// check-suites API. Previously this branch unconditionally posted a pending status and
+	// returned. That meant if the last check_suite completed webhook GitHub delivered for a
+	// commit happened to come from an ignored app, the status could get stuck on pending
+	// forever even though every tracked check suite had already succeeded (see
+	// Azure/azure-dev#9198, where the only recovery was a manual `/check-enforcer evaluate`).
+	//
+	// Fetching all check suites and filtering to the apps we target (GetCheckSuiteStatuses)
+	// preserves the original race-condition protection: setStatusForCheckSuiteConclusions only
+	// posts success when every tracked check suite has completed successfully, so a Github
+	// Actions suite racing ahead of Azure Pipelines registering/completing its own suite still
+	// results in pending. It just no longer leaves a resolvable status stuck on pending.
 	if !eventIsFromSupportedApp {
-		fmt.Println("Skipping check suite evaluation for event from ignored github app", cs.CheckSuite.App.Name)
-		// A pending status is redundant with the default status, but it allows us to
-		// add more details to the status check in the UI such as a link back to the
-		// check enforcer run that evaluated pending.
-		return gh.SetStatus(cs.GetStatusesUrl(), newPendingBody())
+		fmt.Println("Evaluating tracked check suites for event from ignored github app", cs.CheckSuite.App.Name)
+		checkSuites, err := gh.GetCheckSuiteStatuses(cs.GetCheckSuiteUrl())
+		handleError(err)
+		return setStatusForCheckSuiteConclusions(gh, checkSuites, cs.GetStatusesUrl())
 	}
 
 	if len(gh.AppTargets) > 1 {
